@@ -78,6 +78,7 @@ func (a *API) Router() http.Handler {
 		// Platform admin (X-Admin-Key).
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAdmin)
+			r.Get("/admin/disputes", a.adminDisputes)
 			r.Post("/admin/gigs/{id}/dispute/resolve", a.resolve)
 			r.Get("/admin/reconciliation", a.reconcile)
 		})
@@ -283,6 +284,11 @@ func (a *API) creatorDispute(action string) http.HandlerFunc {
 }
 
 // ---------- admin + misc ----------
+
+func (a *API) adminDisputes(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.EscalatedDisputes(r.Context())
+	a.respond(w, r, http.StatusOK, "escalated disputes", out, err)
+}
 
 func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	var in struct {

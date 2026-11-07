@@ -151,6 +151,7 @@ Responses look like Busha's: `{"status": "success"|"error", "message": "...", "d
 | client | `POST /v1/client/bookings/{id}/checkout` | Pay: `{"currency": "NGN"}` or `"USDT"` |
 | client | `POST /v1/client/bookings/{id}/complete` · `/complaints` · `/cancel` | Done, dispute, cancel |
 | client | `POST /v1/client/bookings/{id}/dispute/propose` · `/accept` | Agree a split |
+| admin (`X-Admin-Key`) | `GET /v1/admin/disputes` | The arbitration queue: escalated disputes, both sides' last offer |
 | admin (`X-Admin-Key`) | `POST /v1/admin/gigs/{id}/dispute/resolve` | After 3 days: `{"creator_percent": 50}`, 10% fee |
 | admin | `GET /v1/admin/reconciliation` | Ledger vs Busha |
 | Busha | `POST /v1/webhooks/busha` | Signed webhooks |
