@@ -426,6 +426,7 @@ export function CreatorGig({ id }: { id: string }) {
   const d = p.data;
   const { busy, err, run } = useAction();
   const [copied, setCopied] = useState(false);
+  const [confirmVoid, setConfirmVoid] = useState(false);
   const dispute = d?.complaints.length ? d.complaints[d.complaints.length - 1] : null;
   const link = d?.pay_path ? window.location.origin + d.pay_path : "";
   const upfront = d ? d.gig.deposit_bps / 100 : 0;
@@ -459,6 +460,26 @@ export function CreatorGig({ id }: { id: string }) {
               <div className="min-w-0 flex-1 truncate text-[13px] font-bold">{link.replace(/^https?:\/\//, "")}</div>
               <Btn small full={false} variant="soft" icon={copied ? "check" : "copy"} onClick={() => { navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? "Copied" : "Copy"}</Btn>
             </div>
+          )}
+          {d.gig.status === "AWAITING_PAYMENT" && (
+            confirmVoid ? (
+              <div className="flex flex-col gap-2.5">
+                <Note tone="red" icon="alert">
+                  Withdraw this invoice? {first(d.gig.client_name) || "The client"} will no longer be able to pay it, and this can't be undone.
+                </Note>
+                <Btn variant="danger" icon="x" disabled={busy}
+                  onClick={() => run(async () => { await api.voidInvoice(id); setConfirmVoid(false); p.refresh(); })}>
+                  Yes, void it
+                </Btn>
+                <Btn variant="soft" disabled={busy} onClick={() => setConfirmVoid(false)}>Keep it</Btn>
+              </div>
+            ) : (
+              <Btn variant="soft" icon="x" disabled={busy} onClick={() => setConfirmVoid(true)}>Void this invoice</Btn>
+            )
+          )}
+          {d.gig.status === "VOIDED" && <Note tone="soft" icon="x">You withdrew this invoice, so it can no longer be paid.</Note>}
+          {d.gig.status === "EXPIRED" && (
+            <Note tone="soft" icon="clock">This invoice expired before it was paid. Send {first(d.gig.client_name) || "your client"} a new one.</Note>
           )}
           {d.gig.status === "DONE_PENDING" && (
             <Hero strip={[110, 140]}>

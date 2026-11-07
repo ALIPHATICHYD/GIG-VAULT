@@ -178,6 +178,8 @@ const STATUS: Record<GigStatus, { label: string; kind: "pending" | "held" | "rel
   RELEASED: { label: "Paid", kind: "paid", icon: "check" },
   PARTIALLY_REFUNDED: { label: "Settled", kind: "off", icon: "check" },
   CANCELLED: { label: "Cancelled", kind: "off", icon: "x" },
+  VOIDED: { label: "Voided", kind: "off", icon: "x" },
+  EXPIRED: { label: "Expired", kind: "off", icon: "clock" },
 };
 const CHIP = { pending: "bg-circ text-mu", held: "bg-soft text-acc", rel: "bg-amb-bg text-amb", disp: "bg-red-bg text-red", paid: "bg-lime text-dg", off: "bg-circ text-mu" };
 

@@ -128,8 +128,8 @@ export function Bookings({ tab = "pending" }: { tab?: "pending" | "history" }) {
           <SectionTitle>Pending payments</SectionTitle>
           {b.data && pending.length === 0 && <p className="-mt-3 text-sm text-mu">Nothing to pay. Invoices creators send you show up here.</p>}
           {pending.map((g, i) => <InvoiceTile key={g.id} g={g} cta={i === 0} />)}
-          {rest.filter((g) => !["RELEASED", "CANCELLED", "PARTIALLY_REFUNDED"].includes(g.status)).length > 0 && <SectionTitle>In progress</SectionTitle>}
-          {rest.filter((g) => !["RELEASED", "CANCELLED", "PARTIALLY_REFUNDED"].includes(g.status)).map((g) => <InvoiceTile key={g.id} g={g} />)}
+          {rest.filter((g) => !["RELEASED", "CANCELLED", "PARTIALLY_REFUNDED", "VOIDED", "EXPIRED"].includes(g.status)).length > 0 && <SectionTitle>In progress</SectionTitle>}
+          {rest.filter((g) => !["RELEASED", "CANCELLED", "PARTIALLY_REFUNDED", "VOIDED", "EXPIRED"].includes(g.status)).map((g) => <InvoiceTile key={g.id} g={g} />)}
         </>
       )}
       {tab === "history" && (
@@ -270,6 +270,8 @@ export function Booking({ id }: { id: string }) {
       )}
       {s === "PARTIALLY_REFUNDED" && <Note tone="soft" icon="check">The dispute is settled. Your share has been refunded.</Note>}
       {s === "CANCELLED" && <Note tone="soft" icon="x">This booking was cancelled.</Note>}
+      {s === "VOIDED" && <Note tone="soft" icon="x">{name} withdrew this invoice, so it can no longer be paid. Ask for a new one if you still need it.</Note>}
+      {s === "EXPIRED" && <Note tone="soft" icon="clock">This invoice expired before it was paid. Ask {name} to send a new one.</Note>}
       <ErrorNote msg={err} />
       {!awaiting && <Timeline events={gig.timeline} amountKobo={gig.amount_ngn_kobo} extra={todo} />}
     </Screen>
