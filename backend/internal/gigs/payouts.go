@@ -488,7 +488,9 @@ func (s *Service) IngestEvent(ctx context.Context, raw []byte) (duplicate bool, 
 			ON CONFLICT (event, reference) DO NOTHING RETURNING id`, ev.Event, ref, raw).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			duplicate = true
-			return nil
+			_, err := tx.Exec(ctx, `UPDATE busha_events SET duplicates = duplicates + 1, last_duplicate_at = now()
+				WHERE event = $1 AND reference = $2`, ev.Event, ref)
+			return err
 		}
 		if err != nil {
 			return err
@@ -496,4 +498,35 @@ func (s *Service) IngestEvent(ctx context.Context, raw []byte) (duplicate bool, 
 		return store.Enqueue(ctx, tx, JobBushaEvent, map[string]int64{"event_id": id}, "", nil)
 	})
 	return duplicate, err
+}
+
+// EventRow is one stored Busha webhook, for the admin view.
+type EventRow struct {
+	ID              int64      `json:"id"`
+	Event           string     `json:"event"`
+	Reference       string     `json:"reference"`
+	ReceivedAt      time.Time  `json:"received_at"`
+	ProcessedAt     *time.Time `json:"processed_at"`
+	Error           *string    `json:"error"`
+	Duplicates      int        `json:"duplicates"`
+	LastDuplicateAt *time.Time `json:"last_duplicate_at"`
+}
+
+// RecentEvents lists the latest stored webhooks, newest first.
+func (s *Service) RecentEvents(ctx context.Context, limit int) ([]EventRow, error) {
+	rows, err := s.DB.Query(ctx, `SELECT id, event, reference, received_at, processed_at, error, duplicates, last_duplicate_at
+		FROM busha_events ORDER BY received_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EventRow{}
+	for rows.Next() {
+		var e EventRow
+		if err := rows.Scan(&e.ID, &e.Event, &e.Reference, &e.ReceivedAt, &e.ProcessedAt, &e.Error, &e.Duplicates, &e.LastDuplicateAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

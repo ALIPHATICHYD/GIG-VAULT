@@ -193,6 +193,11 @@ func (s *Service) CreateGigLink(ctx context.Context, workerID string, in CreateG
 			int(s.Cfg.ComplaintWindow.Seconds()), StatusAwaitingPayment, token); err != nil {
 			return err
 		}
+		// An invoice nobody pays shouldn't sit open for ever.
+		if err := store.Enqueue(ctx, tx, JobExpireInvoice, map[string]string{"gig_id": id},
+			"expire:"+id, time.Now().Add(s.Cfg.InvoiceExpiry)); err != nil {
+			return err
+		}
 		return store.Audit(ctx, tx, id, workerID, "creator", "invoice.sent", "", StatusAwaitingPayment,
 			map[string]any{"amount_ngn_kobo": kobo, "client_name": in.ClientName, "upfront_percent": upfront / 100})
 	})

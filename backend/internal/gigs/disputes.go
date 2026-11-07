@@ -3,6 +3,7 @@ package gigs
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -63,6 +64,175 @@ func (s *Service) disputes(ctx context.Context, gigID string) ([]Dispute, error)
 		out = append(out, *d)
 	}
 	return out, rows.Err()
+}
+
+// ---------- admin: the arbitration queue ----------
+
+// EscalatedDispute is one row of GigVault's to-do list: a dispute both sides
+// failed to settle, with everything needed to decide a split.
+type EscalatedDispute struct {
+	DisputeID       string            `json:"dispute_id"`
+	GigID           string            `json:"gig_id"`
+	Title           string            `json:"title"`
+	AmountNGNKobo   int64             `json:"amount_ngn_kobo"`
+	Reason          string            `json:"reason"`
+	RaisedBy        string            `json:"raised_by"`
+	FrozenUSDTMicro int64             `json:"frozen_usdt_micro"`
+	FrozenNGNKobo   int64             `json:"frozen_ngn_kobo"`
+	Creator         DisputeParty      `json:"creator"`
+	Client          DisputeParty      `json:"client"`
+	Proposals       []DisputeProposal `json:"proposals"`
+	OpenedAt        time.Time         `json:"opened_at"`
+	EscalatedAt     *time.Time        `json:"escalated_at"`
+	FeePercent      int               `json:"fee_percent"`
+}
+
+type DisputeParty struct {
+	Name  *string `json:"name"`
+	Email *string `json:"email"`
+}
+
+// DisputeProposal is one side's most recent offer: "the creator should get X%
+// of the frozen money".
+type DisputeProposal struct {
+	By             string    `json:"by"` // creator | client
+	CreatorPercent int       `json:"creator_percent"`
+	At             time.Time `json:"at"`
+}
+
+// EscalatedDisputes lists the disputes awaiting GigVault's decision. A resolved
+// dispute drops off on its own, because ResolveDispute moves it off 'escalated'.
+//
+// Each side's last proposal comes from audit_log, not from complaints: that
+// table keeps a single proposal column that each new proposal overwrites, so it
+// cannot say what both sides last offered. The audit log has every one, with
+// the actor who made it. The escalation time comes from the same place, which
+// is why none of this needs a schema change.
+func (s *Service) EscalatedDisputes(ctx context.Context) ([]EscalatedDispute, error) {
+	rows, err := s.DB.Query(ctx, `SELECT c.id, c.gig_id, g.title, g.amount_ngn_kobo, g.amount_usdt_micro,
+			c.reason, c.raised_by, c.created_at, w.name, w.email,
+			COALESCE(u.name, g.client_name), COALESCE(u.email, g.client_email)
+		FROM complaints c
+		JOIN gigs g    ON g.id = c.gig_id
+		JOIN workers w ON w.id = g.worker_id
+		LEFT JOIN users u ON u.id = g.client_user_id
+		WHERE c.status = 'escalated'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []EscalatedDispute{}
+	gigIDs := []string{}
+	totals := map[string]int64{} // gig id -> amount_usdt_micro, for the naira conversion
+	for rows.Next() {
+		var d EscalatedDispute
+		var usdtTotal *int64
+		if err := rows.Scan(&d.DisputeID, &d.GigID, &d.Title, &d.AmountNGNKobo, &usdtTotal,
+			&d.Reason, &d.RaisedBy, &d.OpenedAt, &d.Creator.Name, &d.Creator.Email,
+			&d.Client.Name, &d.Client.Email); err != nil {
+			return nil, err
+		}
+		d.FeePercent = s.Cfg.DisputeFeeBps / 100
+		d.Proposals = []DisputeProposal{}
+		if usdtTotal != nil {
+			totals[d.GigID] = *usdtTotal
+		}
+		gigIDs = append(gigIDs, d.GigID)
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	proposals, err := s.lastProposals(ctx, gigIDs)
+	if err != nil {
+		return nil, err
+	}
+	escalatedAt, err := s.escalationTimes(ctx, gigIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range out {
+		d := &out[i]
+		d.Proposals = proposals[d.GigID]
+		if at, ok := escalatedAt[d.GigID]; ok {
+			d.EscalatedAt = &at
+		}
+		// Read the frozen amount from the ledger rather than the stored
+		// column, so a partial release is reflected.
+		if d.FrozenUSDTMicro, err = ledger.Balance(ctx, s.DB, ledger.Frozen(d.GigID)); err != nil {
+			return nil, err
+		}
+		if total := totals[d.GigID]; total > 0 {
+			d.FrozenNGNKobo = d.AmountNGNKobo * d.FrozenUSDTMicro / total
+		}
+	}
+
+	// Oldest escalation first: that is the one GigVault has kept waiting longest.
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i].EscalatedAt, out[j].EscalatedAt
+		switch {
+		case a != nil && b != nil:
+			return a.Before(*b)
+		case a != nil:
+			return true
+		case b != nil:
+			return false
+		default:
+			return out[i].OpenedAt.Before(out[j].OpenedAt)
+		}
+	})
+	return out, nil
+}
+
+// lastProposals returns each side's most recent proposal per gig, newest wins.
+func (s *Service) lastProposals(ctx context.Context, gigIDs []string) (map[string][]DisputeProposal, error) {
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT ON (gig_id, actor)
+			gig_id, actor, (details->>'creator_percent')::int, created_at
+		FROM audit_log
+		WHERE action = 'dispute.split_proposed' AND gig_id = ANY($1)
+		  AND details ? 'creator_percent'
+		ORDER BY gig_id, actor, id DESC`, gigIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byGig := map[string][]DisputeProposal{}
+	for rows.Next() {
+		var gigID string
+		var p DisputeProposal
+		if err := rows.Scan(&gigID, &p.By, &p.CreatorPercent, &p.At); err != nil {
+			return nil, err
+		}
+		byGig[gigID] = append(byGig[gigID], p)
+	}
+	return byGig, rows.Err()
+}
+
+func (s *Service) escalationTimes(ctx context.Context, gigIDs []string) (map[string]time.Time, error) {
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT ON (gig_id) gig_id, created_at
+		FROM audit_log
+		WHERE action = 'dispute.escalated_to_gigvault' AND gig_id = ANY($1)
+		ORDER BY gig_id, id DESC`, gigIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	at := map[string]time.Time{}
+	for rows.Next() {
+		var gigID string
+		var t time.Time
+		if err := rows.Scan(&gigID, &t); err != nil {
+			return nil, err
+		}
+		at[gigID] = t
+	}
+	return at, rows.Err()
 }
 
 func openDispute(ctx context.Context, tx pgx.Tx, gigID string) (*Dispute, error) {
