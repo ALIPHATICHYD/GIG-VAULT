@@ -4,7 +4,7 @@ const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 export type Role = "creator" | "client";
 export type GigStatus =
   | "AWAITING_PAYMENT" | "BOOKED" | "DONE_PENDING" | "DISPUTED" | "ESCALATED"
-  | "RELEASED" | "PARTIALLY_REFUNDED" | "CANCELLED" | "VOIDED";
+  | "RELEASED" | "PARTIALLY_REFUNDED" | "CANCELLED" | "VOIDED" | "EXPIRED";
 
 export interface User { id: string; email: string; name: string; phone: string | null; role: Role; worker_id: string | null }
 

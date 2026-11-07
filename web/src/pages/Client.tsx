@@ -178,6 +178,11 @@ export function Booking({ id }: { id: string }) {
               {gig.creator.name.split(" ")[0]} withdrew this invoice, so it can no longer be paid. Ask her to send a new one if you still need it.
             </p>
           )}
+          {gig.status === "EXPIRED" && (
+            <p className="rounded-xl bg-stone-100 p-4 text-sm">
+              This invoice expired before it was paid. Ask {gig.creator.name.split(" ")[0]} to send a new one.
+            </p>
+          )}
           <ErrorNote msg={err} />
           <Timeline events={gig.timeline} amountKobo={gig.amount_ngn_kobo} tone="client" />
         </>

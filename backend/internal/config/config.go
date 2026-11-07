@@ -28,6 +28,7 @@ type Config struct {
 	FreezeBps        int           // share of the remaining escrow a complaint can freeze
 	ComplaintWindow  time.Duration // time after "gig done" before auto-release
 	LateCancelWindow time.Duration // cancelling closer than this to the event is "late"
+	InvoiceExpiry    time.Duration // an unpaid invoice expires this long after it is sent
 	MockRateNGN      int64         // NGN per 1 USDT used only in mock mode
 
 	AllowDevRoutes bool
@@ -53,6 +54,7 @@ func Load() (Config, error) {
 		FreezeBps:          envInt("FREEZE_BPS", 5000),
 		ComplaintWindow:    envDur("COMPLAINT_WINDOW", 60*time.Second),
 		LateCancelWindow:   envDur("LATE_CANCEL_WINDOW", 24*time.Hour),
+		InvoiceExpiry:      envDur("INVOICE_EXPIRY", 168*time.Hour),
 		MockRateNGN:        int64(envInt("MOCK_RATE_NGN", 1600)),
 		AllowDevRoutes:     env("ALLOW_DEV_ROUTES", "true") == "true",
 		CORSOrigin:         env("CORS_ORIGIN", "http://localhost:5173"),

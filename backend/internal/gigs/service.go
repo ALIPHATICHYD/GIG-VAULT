@@ -27,6 +27,7 @@ const (
 	JobAutoRelease     = "auto_release"
 	JobMockSettlement  = "mock_transfer_settle"
 	JobEscalateDispute = "escalate_dispute"
+	JobExpireInvoice   = "expire_invoice"
 )
 
 type Service struct {
@@ -53,9 +54,19 @@ func (s *Service) MarkFunded(ctx context.Context, reference, settledUSDT, event 
 		if err != nil {
 			return err
 		}
-		if g.Status != StatusAwaitingPayment {
+		if !fundable(g.Status) {
 			s.Log.Info("funding already applied", "gig", g.ID, "status", g.Status)
 			return nil
+		}
+		// The client paid an invoice we had already closed. The money is really
+		// in our Busha balance, so honour it rather than leave the client paying
+		// for nothing and the reconciliation report out by the amount.
+		if g.Status == StatusVoided || g.Status == StatusExpired {
+			s.Log.Warn("payment arrived for a closed invoice; reopening", "gig", g.ID, "status", g.Status)
+			if err := store.Audit(ctx, tx, g.ID, g.WorkerID, "system", "invoice.reopened_by_payment", g.Status, StatusBooked,
+				map[string]any{"was": g.Status, "event": event}); err != nil {
+				return err
+			}
 		}
 		amount := int64(0)
 		if g.AmountUSDTMicro != nil {
@@ -267,6 +278,24 @@ func (s *Service) VoidInvoice(ctx context.Context, userID, gigID string) (*GigDe
 		return nil, err
 	}
 	return s.GetGig(ctx, gigID)
+}
+
+// ExpireInvoice is run by the worker INVOICE_EXPIRY after an invoice is sent.
+// It is a no-op unless the invoice is still unpaid, so an invoice that was paid,
+// cancelled or voided in the meantime is left exactly as it is and the job is
+// marked done rather than retried.
+func (s *Service) ExpireInvoice(ctx context.Context, gigID string) error {
+	return store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
+		g, err := getGig(ctx, tx, gigID, true)
+		if err != nil {
+			return err
+		}
+		if g.Status != StatusAwaitingPayment {
+			return nil
+		}
+		return setStatus(ctx, tx, g, StatusExpired, "system", "invoice.expired",
+			map[string]any{"sent_at": g.CreatedAt, "after": s.Cfg.InvoiceExpiry.String()})
+	})
 }
 
 // ---------- reads ----------

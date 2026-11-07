@@ -16,6 +16,8 @@ import (
 //	AWAITING_PAYMENT -> BOOKED (payment confirmed by Busha webhook; deposit released)
 //	AWAITING_PAYMENT -> CANCELLED
 //	AWAITING_PAYMENT -> VOIDED (creator retires an invoice the client never paid)
+//	AWAITING_PAYMENT -> EXPIRED (INVOICE_EXPIRY passes without payment)
+//	VOIDED | EXPIRED -> BOOKED (money arrives anyway; we honour it, never absorb it)
 //	BOOKED           -> DONE_PENDING (client or organiser confirms the gig is done)
 //	BOOKED           -> CANCELLED (remaining escrow refunded; deposit kept on late cancel)
 //	DONE_PENDING     -> RELEASED (complaint window ends, worker job auto-releases)
@@ -33,7 +35,16 @@ const (
 	StatusPartiallyRefunded = "PARTIALLY_REFUNDED"
 	StatusCancelled         = "CANCELLED"
 	StatusVoided            = "VOIDED"
+	StatusExpired           = "EXPIRED"
 )
+
+// fundable reports whether money arriving for a gig in this status should be
+// accepted. A voided or expired invoice is included on purpose: if the client
+// pays anyway, the money has really arrived in our Busha balance and must be
+// credited to the invoice rather than silently absorbed.
+func fundable(status string) bool {
+	return status == StatusAwaitingPayment || status == StatusVoided || status == StatusExpired
+}
 
 type Gig struct {
 	ID                     string          `json:"id"`

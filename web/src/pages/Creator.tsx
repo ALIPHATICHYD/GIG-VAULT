@@ -274,6 +274,9 @@ export function CreatorGig({ id }: { id: string }) {
           {d.gig.status === "VOIDED" && (
             <p className="rounded-xl bg-stone-100 p-4 text-sm">You withdrew this invoice, so it can no longer be paid.</p>
           )}
+          {d.gig.status === "EXPIRED" && (
+            <p className="rounded-xl bg-stone-100 p-4 text-sm">This invoice expired before it was paid. Send {d.gig.client_name ?? "your client"} a new one.</p>
+          )}
           {d.gig.status === "DONE_PENDING" && <Countdown until={d.gig.release_at} label="Paying out to you in" />}
           {dispute && (d.gig.status === "DISPUTED" || d.gig.status === "ESCALATED") && (
             <DisputePanel dispute={dispute} me="creator" feePercent={10} busy={busy}
