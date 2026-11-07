@@ -1,0 +1,45 @@
+{
+  "business_id": "BUS_5asfnvrY9UuXBun4GWqNW",
+  "event": "transfer.funds_delivered",
+  "data": {
+    "id": "TRF_BuIVXa89aFC3",
+    "profile_id": "BUS_5asfnvrY9UuXBun4GWqNW",
+    "quote_id": "QUO_VJOBEK5ycGVM",
+    "reference": "PAY_cashout001",
+    "stages": [
+      "conversion",
+      "withdrawal"
+    ],
+    "category": "sell",
+    "description": "Sold USDT",
+    "sub_description": "For NGN",
+    "source_currency": "USDT",
+    "target_currency": "NGN",
+    "source_amount": "3.81861051",
+    "target_amount": "5000",
+    "trade": "sell",
+    "rate": {
+      "product": "USDTNGN",
+      "rate": "1365.68",
+      "side": "sell",
+      "type": "FIXED",
+      "source_currency": "USDT",
+      "target_currency": "NGN"
+    },
+    "fees": [],
+    "pay_out": {
+      "recipient_details": {
+        "account_name": "Michael Scott",
+        "account_number": "0123456789",
+        "bank_code": "000004",
+        "bank_name": "UNITED BANK FOR AFRICA"
+      },
+      "recipient_id": "6aef17a5e1195a4ceae7583e",
+      "type": "bank_transfer"
+    },
+    "status": "funds_delivered",
+    "created_at": "2026-05-08T13:33:52.23489Z",
+    "updated_at": "2026-05-08T13:35:14.54597Z"
+  }
+}
+

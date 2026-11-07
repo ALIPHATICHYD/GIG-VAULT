@@ -1,0 +1,17 @@
+{
+  "business_id": "BUS_CQr0jPzGGzmn1uW5W7OVs",
+  "event": "customer.verification.active",
+  "data": {
+    "id": "CUS_Ikdb49NLsnlYU",
+    "business_id": "BUS_CQr0jPzGGzmn1uW5W7OVs",
+    "business_name": "",
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "customer@gmail.com",
+    "type": "individual",
+    "status": "active",
+    "level": "1",
+    "created_at": "2026-01-27T09:23:09.317273Z",
+    "updated_at": "2026-01-27T10:15:20.456789Z"
+  }
+}

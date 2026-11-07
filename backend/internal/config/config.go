@@ -14,12 +14,13 @@ type Config struct {
 	DatabaseUnpooledURL string
 
 	// Busha
-	BushaMode          string // "live" (sandbox/production API) or "mock" (offline fallback, clearly labelled)
+	BushaMode          string        // "live" (sandbox/production API) or "mock" (offline fallback, clearly labelled)
 	BushaBaseURL       string
 	BushaSecretKey     string
 	BushaPublicKey     string
 	BushaProfileID     string
 	BushaWebhookSecret string
+	BushaPollInterval  time.Duration // interval for polling stuck payment requests & transfers
 
 	// Escrow rules (from our Scenario 3 pitch)
 	DepositBps       int           // default upfront share released at payment, basis points (2000 = 20%)
@@ -50,9 +51,10 @@ func Load() (Config, error) {
 		BushaMode:           env("BUSHA_MODE", "mock"),
 		BushaBaseURL:       env("BUSHA_BASE_URL", "https://api.sandbox.busha.so"),
 		BushaSecretKey:     os.Getenv("BUSHA_SECRET_KEY"),
-		BushaPublicKey:     os.Getenv("BUSHA_PUBLIC_KEY"),
-		BushaProfileID:     os.Getenv("BUSHA_PROFILE_ID"),
-		BushaWebhookSecret: env("BUSHA_WEBHOOK_SECRET", "dev-webhook-secret"),
+		BushaPublicKey:      os.Getenv("BUSHA_PUBLIC_KEY"),
+		BushaProfileID:      os.Getenv("BUSHA_PROFILE_ID"),
+		BushaWebhookSecret:  env("BUSHA_WEBHOOK_SECRET", "dev-webhook-secret"),
+		BushaPollInterval:   envDur("BUSHA_POLL_INTERVAL", 30*time.Second),
 		DepositBps:         envInt("DEPOSIT_BPS", 2000),
 		MaxDepositBps:      envInt("MAX_DEPOSIT_BPS", 7000),
 		DisputeWindow:      envDur("DISPUTE_WINDOW", 72*time.Hour),

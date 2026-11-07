@@ -37,6 +37,9 @@ func LoadDotEnv(path string) {
 						v = v[:len(v)-1]
 					}
 				}
+				if v == "" {
+					break
+				}
 				if _, set := os.LookupEnv(k); !set {
 					os.Setenv(k, v)
 				}

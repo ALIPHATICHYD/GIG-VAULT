@@ -115,8 +115,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      // ngrok's free tunnel serves a warning page to browsers unless this is sent.
-      "ngrok-skip-browser-warning": "1",
+      "ngrok-skip-browser-warning": "true",
       ...(s ? { Authorization: `Bearer ${s.token}` } : {}),
       ...(init?.headers ?? {}),
     },

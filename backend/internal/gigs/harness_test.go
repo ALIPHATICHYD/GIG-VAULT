@@ -217,7 +217,7 @@ func (h *harness) pendingJobs(t *testing.T, kind, gigID string) int {
 func (h *harness) makeReleaseDue(t *testing.T, gigID string) {
 	t.Helper()
 	if _, err := h.pool.Exec(h.ctx,
-		`UPDATE gigs SET release_at = now() - interval '1 second' WHERE id = $1`, gigID); err != nil {
+		`UPDATE gigs SET release_at = $2 WHERE id = $1`, gigID, time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("make release due: %v", err)
 	}
 }

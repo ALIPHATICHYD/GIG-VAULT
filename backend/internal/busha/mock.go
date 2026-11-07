@@ -63,16 +63,34 @@ func (m *Mock) CreatePaymentRequest(_ context.Context, in PaymentRequestInput) (
 		PayIn: pi, Mock: true}, nil
 }
 
+func (m *Mock) GetPaymentRequest(_ context.Context, id string) (*PaymentRequest, error) {
+	return &PaymentRequest{ID: id, Status: "pending", Mock: true}, nil
+}
+
 func (m *Mock) CreateQuote(_ context.Context, in QuoteInput) (*Quote, error) {
 	q := &Quote{ID: m.id("QUO"), SourceCurrency: in.SourceCurrency, TargetCurrency: in.TargetCurrency,
 		Rate:   Rate{Rate: strconv.FormatInt(m.RateNGN, 10), Side: "sell", Product: "USDTNGN"},
 		Status: "pending", ExpiresAt: time.Now().Add(3 * time.Minute), Mock: true}
-	if in.SourceAmount != "" {
+	switch {
+	case in.QuoteCurrency == "NGN" && in.QuoteAmount != "":
+		usdt := m.convert("NGN", "USDT", in.QuoteAmount)
+		q.SourceAmount = usdt
+		q.TargetAmount = usdt
+		q.Rate = Rate{Rate: "1", Side: "sell", Product: ""}
+	case in.SourceAmount != "":
 		q.SourceAmount = in.SourceAmount
 		q.TargetAmount = m.convert(in.SourceCurrency, in.TargetCurrency, in.SourceAmount)
-	} else {
+	default:
 		q.TargetAmount = in.TargetAmount
 		q.SourceAmount = m.convert(in.TargetCurrency, in.SourceCurrency, in.TargetAmount)
+	}
+	if in.PayIn != nil {
+		pi, _ := json.Marshal(in.PayIn)
+		q.PayIn = pi
+	}
+	if in.PayOut != nil {
+		po, _ := json.Marshal(in.PayOut)
+		q.PayOut = po
 	}
 	m.mu.Lock()
 	m.quotes[q.ID] = q
@@ -80,7 +98,7 @@ func (m *Mock) CreateQuote(_ context.Context, in QuoteInput) (*Quote, error) {
 	return q, nil
 }
 
-func (m *Mock) CreateTransfer(_ context.Context, quoteID string) (*Transfer, error) {
+func (m *Mock) CreateTransfer(_ context.Context, quoteID, reference string) (*Transfer, error) {
 	m.mu.Lock()
 	q, ok := m.quotes[quoteID]
 	m.mu.Unlock()
@@ -90,8 +108,33 @@ func (m *Mock) CreateTransfer(_ context.Context, quoteID string) (*Transfer, err
 	if time.Now().After(q.ExpiresAt) {
 		return nil, &Error{Status: 422, Body: `{"message":"quote expired"}`}
 	}
-	return &Transfer{ID: m.id("TRF"), QuoteID: quoteID, Status: "processing",
-		SourceAmount: q.SourceAmount, TargetAmount: q.TargetAmount, Mock: true}, nil
+	var payIn json.RawMessage
+	if len(q.PayIn) > 0 {
+		var pi PayIn
+		_ = json.Unmarshal(q.PayIn, &pi)
+		if pi.Type == "address" {
+			net := pi.Network
+			if net == "" {
+				net = "TRX"
+			}
+			payIn, _ = json.Marshal(map[string]any{
+				"type":       "address",
+				"network":    net,
+				"address":    "TMockAddressForDemoOnly000000000",
+				"expires_at": time.Now().Add(30 * time.Minute),
+			})
+		} else {
+			payIn, _ = json.Marshal(map[string]any{
+				"type":           "temporary_bank_account",
+				"bank_name":      "Busha Sandbox Bank (mock)",
+				"account_number": "99" + strconv.FormatInt(time.Now().UnixNano()%100000000, 10),
+				"account_name":   "GigVault Escrow",
+				"expires_at":     time.Now().Add(30 * time.Minute),
+			})
+		}
+	}
+	return &Transfer{ID: m.id("TRF"), QuoteID: quoteID, Reference: reference, Status: "processing",
+		SourceAmount: q.SourceAmount, TargetAmount: q.TargetAmount, PayIn: payIn, Mock: true}, nil
 }
 
 func (m *Mock) GetTransfer(_ context.Context, id string) (*Transfer, error) {

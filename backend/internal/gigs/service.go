@@ -27,6 +27,7 @@ const (
 	JobAutoRelease     = "auto_release"
 	JobMockSettlement  = "mock_transfer_settle"
 	JobEscalateDispute = "escalate_dispute"
+	JobBushaPollStale  = "busha_poll_stale"
 	JobExpireInvoice   = "expire_invoice"
 )
 
@@ -44,7 +45,7 @@ type Service struct {
 func (s *Service) MarkFunded(ctx context.Context, reference, settledUSDT, event string) error {
 	return store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
 		var id string
-		if err := tx.QueryRow(ctx, `SELECT id FROM gigs WHERE payment_reference = $1`, reference).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id FROM gigs WHERE payment_reference = $1 OR busha_payment_request_id = $1 OR busha_quote_id = $1 LIMIT 1`, reference).Scan(&id); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return notFound("gig for reference " + reference)
 			}

@@ -1,0 +1,15 @@
+{
+  "business_id": "BUS_jlKUYwF9z1ynQZ98bWbaP",
+  "event": "transfer.completed",
+  "data": {
+    "id": "TRF_0OF0pBoXllc0",
+    "quote_id": "QUO_0OF0pBoXllc0",
+    "reference": "PAY_cashout001",
+    "status": "completed",
+    "source_currency": "USDT",
+    "target_currency": "NGN",
+    "source_amount": "31.250000",
+    "target_amount": "50000.00"
+  }
+}
+

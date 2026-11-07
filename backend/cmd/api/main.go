@@ -52,7 +52,7 @@ func run(log *slog.Logger) error {
 
 	var api busha.API
 	if cfg.BushaMode == "live" {
-		api = busha.NewClient(cfg.BushaBaseURL, cfg.BushaSecretKey, cfg.BushaProfileID, log)
+		api = busha.NewClient(cfg.BushaBaseURL, cfg.BushaSecretKey, cfg.BushaProfileID, log).WithPublicKey(cfg.BushaPublicKey)
 		log.Info("busha: live", "base_url", cfg.BushaBaseURL)
 	} else {
 		api = busha.NewMock(cfg.MockRateNGN)
@@ -110,8 +110,27 @@ func run(log *slog.Logger) error {
 			}
 			return svc.CompletePayoutByTransfer(ctx, in.TransferID)
 		},
+		gigs.JobBushaPollStale: func(ctx context.Context, _ json.RawMessage) error {
+			return svc.PollStale(ctx)
+		},
 	}}
 	go wk.Run(ctx)
+	go func() {
+		interval := cfg.BushaPollInterval
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = store.Enqueue(ctx, pool, gigs.JobBushaPollStale, map[string]any{}, "", nil)
+			}
+		}
+	}()
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: (&httpapi.API{Svc: svc, Log: log, Signer: auth.Signer{Secret: []byte(cfg.AuthSecret)}}).Router(),
 		ReadHeaderTimeout: 10 * time.Second}

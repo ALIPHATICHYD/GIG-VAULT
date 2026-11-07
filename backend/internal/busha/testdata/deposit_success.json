@@ -1,0 +1,20 @@
+{
+  "business_id": "BUS_jlKUYwF9z1ynQZ98bWbaP",
+  "event": "deposit.success",
+  "data": {
+    "id": "TRF_LJB2GQb55Cs98LbpqgRGx",
+    "quote_id": "QUO_vxnndjeneiviu84",
+    "reference": "GIG_demo002",
+    "status": "funds_received",
+    "source_currency": "USDT",
+    "target_currency": "USDT",
+    "source_amount": "32.851512",
+    "target_amount": "32.851512",
+    "pay_in": {
+      "address": "TWcYEz1UjSre7LqvvPyKHQ7EQzQ9oQDzit",
+      "network": "TRX",
+      "type": "address"
+    }
+  }
+}
+
