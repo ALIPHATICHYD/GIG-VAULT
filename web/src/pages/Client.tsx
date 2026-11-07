@@ -222,7 +222,7 @@ export function Booking({ id }: { id: string }) {
 
       {paying && (gig.pay_in_method === "address" ? <UsdtDetails gig={gig} /> : <BankDetails gig={gig} />)}
       {paying && <Waiting gig={gig} />}
-      {paying && SHOW_DEV_TOOLS && <Btn variant="secondary" disabled={busy} onClick={() => act(() => api.simulatePayment(id))}>Simulate Busha payment webhook (demo)</Btn>}
+      {paying && SHOW_DEV_TOOLS && gig.busha_mode !== "live" && <Btn variant="secondary" disabled={busy} onClick={() => act(() => api.simulatePayment(id))}>Simulate Busha payment webhook (demo)</Btn>}
 
       {!awaiting && (
         <div className="flex items-end justify-between gap-3">
