@@ -50,13 +50,13 @@ export function Signup() {
       <AuthHero line1={role === "creator" ? "Get paid before the gig." : "Book creators. Pay safely."} line2={role === "creator" ? "Safely." : "Held till it's done."} />
       <Seg value={role} onChange={setRole} options={[{ value: "creator", label: "I do gigs" }, { value: "client", label: "I hire" }]} />
       <div className="flex flex-col gap-3">
-        <Field label="Your name" value={f.name} onChange={(v) => setF({ ...f, name: v })} placeholder="Chidinma Okafor" />
+        <Field label="Your name" value={f.name} onChange={(v) => setF({ ...f, name: v })} placeholder="Abdullah Oyetoro" />
         <Field label="Email" value={f.email} onChange={(v) => setF({ ...f, email: v })} inputMode="email" placeholder="you@mail.com" />
         <Field label="Phone" optional value={f.phone} onChange={(v) => setF({ ...f, phone: v })} inputMode="tel" placeholder="+234…" />
         <Field label="Password" type="password" value={f.password} onChange={(v) => setF({ ...f, password: v })} placeholder="At least 6 characters" />
       </div>
       <ErrorNote msg={err} />
-      <p className="text-xs text-mu">Demo logins (password demo1234): chidinma@demo.gigvault (creator), tolu@demo.gigvault (client).</p>
+      <p className="text-xs text-mu">Demo logins (password demo1234): abdullah@demo.gigvault (creator), aminat@demo.gigvault (client).</p>
     </Screen>
   );
 }
@@ -85,7 +85,7 @@ export function Login() {
         <Field label="Password" type="password" value={password} onChange={setPassword} />
       </div>
       <ErrorNote msg={err} />
-      <p className="text-xs text-mu">Demo logins (password demo1234): chidinma@demo.gigvault (creator), tolu@demo.gigvault (client).</p>
+      <p className="text-xs text-mu">Demo logins (password demo1234): abdullah@demo.gigvault (creator), aminat@demo.gigvault (client).</p>
     </Screen>
   );
 }

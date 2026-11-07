@@ -2,7 +2,7 @@
 
 **Invoices for creators, with the money held safely until the work is done.** Built on Busha for Busha Build Day (7 Nov 2026).
 
-Chidinma sings at weddings, does nails and makes brand content. Today she sends an invoice with her account number and hopes the client pays. With GigVault:
+Abdullah is a photographer who shoots weddings, birthdays and brand campaigns. Today he sends an invoice with his account number and hopes the client pays. With GigVault:
 
 1. **She sends an invoice** to a client by name: amount, what it's for, and how much she needs **upfront to start work** (0 to 70%, default 20%).
 2. **The client opens the link**, signs up or logs in, and sees it under **Pending payments**.
@@ -42,8 +42,8 @@ make web          # open http://localhost:5173
 ```
 
 **5. Log in with the demo accounts** (password `demo1234`)
-- Creator: `chidinma@demo.gigvault`
-- Client: `tolu@demo.gigvault`
+- Creator: `abdullah@demo.gigvault`
+- Client: `aminat@demo.gigvault`
 
 Use two browsers (or one normal + one incognito) so you can be both at once.
 
@@ -196,8 +196,8 @@ Responses look like Busha's: `{"status": "success"|"error", "message": "...", "d
 ## 3-minute demo script
 
 1. **Problem (30s):** creators chase payments; 51% of Nigerian creatives deal with payment disputes; banks won't escrow a ₦30,000 job.
-2. **Creator phone (30s):** Chidinma sends an invoice: "Instagram campaign: 3 reels, ₦150,000, 50% upfront". She shares it on WhatsApp.
+2. **Creator phone (30s):** Abdullah sends an invoice: "Instagram campaign: 3 reels, ₦150,000, 50% upfront". He shares it on WhatsApp.
 3. **Judge's phone (45s):** opens the link and signs up as a client. The invoice is under Pending payments. They pay through Busha and it shows "Locked".
 4. **Creator phone (15s):** ₦75,000 is already withdrawable. The rest shows as locked.
-5. **Dispute (30s):** the judge raises "only 2 of 3 reels". Chidinma proposes 70/30 and the judge accepts. It settles at no fee, and the timeline shows every step.
+5. **Dispute (30s):** the judge raises "only 2 of 3 reels". Abdullah proposes 70/30 and the judge accepts. It settles at no fee, and the timeline shows every step.
 6. **Close (30s):** cash out to bank through Busha; show the ledger and reconciliation. If they can't agree within 3 days, GigVault decides and earns 10%. That's the business model.

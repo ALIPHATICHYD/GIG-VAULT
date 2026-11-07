@@ -395,12 +395,13 @@ func (s *Service) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	return out, nil
 }
 
-// EnsureDemoWorker seeds Chidinma so the demo works on a fresh database.
+// EnsureDemoWorker seeds Abdullah, the demo photographer, so the demo works on a fresh database.
 func (s *Service) EnsureDemoWorker(ctx context.Context) error {
 	_, err := s.DB.Exec(ctx, `INSERT INTO workers (id, name, email, phone, bank_name, bank_code, account_number, account_name, craft, kyc_status)
-		VALUES ('WRK_chidinma', 'Chidinma Okafor', 'chidinma@example.com', '+2348000000000', 'GTBank', '000013', '0123456789',
-		        'CHIDINMA OKAFOR', 'Singer · Nail tech · Dancer', 'verified')
-		ON CONFLICT (id) DO NOTHING`)
+		VALUES ('WRK_chidinma', 'Abdullah Oyetoro', 'abdullah@example.com', '+2348000000000', 'GTBank', '000013', '0123456789',
+		        'ABDULLAH OYETORO', 'Photographer', 'verified')
+		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email,
+		        account_name = EXCLUDED.account_name, craft = EXCLUDED.craft`)
 	if err != nil {
 		return err
 	}
@@ -410,9 +411,15 @@ func (s *Service) EnsureDemoWorker(ctx context.Context) error {
 		return err
 	}
 	_, err = s.DB.Exec(ctx, `INSERT INTO users (id, email, name, phone, role, password_hash, worker_id) VALUES
-		('USR_demo_creator', 'chidinma@demo.gigvault', 'Chidinma Okafor', '+2348000000000', 'creator', $1, 'WRK_chidinma'),
-		('USR_demo_client',  'tolu@demo.gigvault',     'Tolu Adeyemi',    '+2348000000001', 'client',  $1, NULL)
-		ON CONFLICT (id) DO NOTHING`, hash)
+		('USR_demo_creator', 'abdullah@demo.gigvault', 'Abdullah Oyetoro', '+2348000000000', 'creator', $1, 'WRK_chidinma'),
+		('USR_demo_client',  'aminat@demo.gigvault',   'Aminat Bello',     '+2348000000001', 'client',  $1, NULL)
+		ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`, hash)
+	if err != nil {
+		return err
+	}
+	// Invoices made before the demo cast was renamed still carry the old client name.
+	_, err = s.DB.Exec(ctx, `UPDATE gigs SET client_name = 'Aminat Bello', client_email = 'aminat@demo.gigvault'
+		WHERE client_name = 'Tolu Adeyemi'`)
 	return err
 }
 
