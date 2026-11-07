@@ -66,7 +66,9 @@ func (s *Service) Cashout(ctx context.Context, workerID string, in CashoutInput)
 		recipient = *w.BushaRecipientID
 	}
 	if recipient == "" && s.Busha.Mode() == "live" {
-		return nil, conflict("no_bank_account", "add a bank account (Busha recipient) before cashing out")
+		if recipient, err = s.ensureRecipient(ctx, w); err != nil {
+			return nil, err
+		}
 	}
 
 	q, err := s.Busha.CreateQuote(ctx, busha.QuoteInput{SourceCurrency: "USDT", TargetCurrency: "NGN",
@@ -329,4 +331,33 @@ func (s *Service) RecentEvents(ctx context.Context, limit int) ([]EventRow, erro
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ensureRecipient registers the worker's saved bank account with Busha the
+// first time they cash out. Workers created before live mode (like the seeded
+// demo worker) have bank details but no Busha recipient yet.
+func (s *Service) ensureRecipient(ctx context.Context, w *Worker) (string, error) {
+	if w.BankCode == nil || *w.BankCode == "" || w.AccountNumber == nil || *w.AccountNumber == "" {
+		return "", conflict("no_bank_account", "add a bank account before cashing out")
+	}
+	in := busha.RecipientInput{Type: "ngn_bank", Currency: "NGN", CountryCode: "NG",
+		AccountNumber: *w.AccountNumber, BankCode: *w.BankCode, AccountName: w.Name}
+	if w.AccountName != nil && *w.AccountName != "" {
+		in.AccountName = *w.AccountName
+	}
+	if w.BankName != nil {
+		in.BankName = *w.BankName
+	}
+	if w.Email != nil {
+		in.Email = *w.Email
+	}
+	rcp, err := s.Busha.CreateRecipient(ctx, in)
+	if err != nil {
+		return "", upstream("could not register your bank account with Busha", err)
+	}
+	if _, err := s.DB.Exec(ctx, `UPDATE workers SET busha_recipient_id = $2 WHERE id = $1`, w.ID, rcp.ID); err != nil {
+		return "", err
+	}
+	w.BushaRecipientID = &rcp.ID
+	return rcp.ID, nil
 }
