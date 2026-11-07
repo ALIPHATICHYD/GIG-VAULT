@@ -444,17 +444,14 @@ func (s *Service) Wallet(ctx context.Context, workerID string) (*Wallet, error) 
 	if wl.Gigs, err = s.ListGigs(ctx, workerID); err != nil {
 		return nil, err
 	}
-	for _, g := range wl.Gigs {
-		e, err := ledger.Balance(ctx, s.DB, ledger.Escrow(g.ID))
-		if err != nil {
-			return nil, err
-		}
-		f, err := ledger.Balance(ctx, s.DB, ledger.Frozen(g.ID))
-		if err != nil {
-			return nil, err
-		}
-		wl.LockedUSDT += e
-		wl.FrozenUSDT += f
+	// One round trip for every invoice's escrow and frozen balance. The DB is
+	// remote (Neon), so a query per invoice made this endpoint take seconds.
+	if err = s.DB.QueryRow(ctx, `SELECT
+			COALESCE(SUM(CASE WHEN e.account LIKE 'escrow:%' THEN CASE e.direction WHEN 'credit' THEN e.amount_minor ELSE -e.amount_minor END END), 0),
+			COALESCE(SUM(CASE WHEN e.account LIKE 'frozen:%' THEN CASE e.direction WHEN 'credit' THEN e.amount_minor ELSE -e.amount_minor END END), 0)
+		FROM gigs g JOIN ledger_entries e ON e.account IN ('escrow:' || g.id, 'frozen:' || g.id)
+		WHERE g.worker_id = $1`, workerID).Scan(&wl.LockedUSDT, &wl.FrozenUSDT); err != nil {
+		return nil, err
 	}
 	// Latest rate we saw from Busha for this worker's gigs.
 	for _, g := range wl.Gigs {
