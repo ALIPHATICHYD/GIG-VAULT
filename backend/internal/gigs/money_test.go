@@ -24,3 +24,14 @@ func TestBpsLeavesRemainderInEscrow(t *testing.T) {
 		t.Fatalf("got %d", got)
 	}
 }
+
+func TestUSDTToKoboRoundsToWholeNaira(t *testing.T) {
+	// 500,000 NGN settled as 361.93 USDT; 20% upfront is 72.386 USDT.
+	rate := 500000.0 / 361.93
+	if got := usdtToKobo(72386000, rate); got != 10000000 {
+		t.Fatalf("got %d kobo, want 10000000 (N100,000)", got)
+	}
+	if got := usdtToKobo(0, rate); got != 0 {
+		t.Fatalf("zero: got %d", got)
+	}
+}
