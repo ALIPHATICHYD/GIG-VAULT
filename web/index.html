@@ -2,10 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GigVault</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B3B2E" />
+    <title>GigVault: get paid before the gig</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300..800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48' fill='none' stroke-linecap='round'%3E%3Crect width='48' height='48' rx='14' fill='%230B3B2E'/%3E%3Cpath d='M34.6 13.4 A15 15 0 1 0 36.3 32.6' stroke='white' stroke-width='5.5'/%3E%3Crect x='21' y='20' width='25' height='9' rx='2.5' fill='%23D8FA7A'/%3E%3Ccircle cx='37.5' cy='24.5' r='2' fill='%230B3B2E'/%3E%3C/svg%3E" />
+    <script>
+      // Pick the theme before first paint so there's no flash.
+      (function () {
+        var t = localStorage.getItem("gigvault.theme");
+        if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
   </head>
-  <body class="bg-stone-100">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

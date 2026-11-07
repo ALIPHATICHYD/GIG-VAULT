@@ -1,24 +1,30 @@
 import { useState } from "react";
 import { api, session, type Role } from "../api";
 import { navigate, query, useLocation } from "../router";
-import { Button, ErrorNote, Field, Shell, useAction } from "../ui";
+import { markLime } from "../art";
+import { Art, Strip } from "../brand";
+import { Btn, ErrorNote, Field, RoundButton, Screen, Seg, ThemeToggle, useAction } from "../ui";
 
 export function homeFor(role: Role, hasWorker: boolean) {
   if (role === "client") return "/bookings";
   return hasWorker ? "/app" : "/onboard";
 }
 
-export function Landing() {
+function AuthHero({ line1, line2 }: { line1: string; line2: string }) {
   return (
-    <Shell title="Get paid for every gig. Guaranteed." subtitle="Clients pay upfront. We hold it safely on Busha. You get paid the moment the gig is done.">
-      <div className="grid gap-3">
-        <Button onClick={() => navigate("/signup?role=creator")}>I'm a creator</Button>
-        <Button variant="client" onClick={() => navigate("/signup?role=client")}>I'm booking a creator</Button>
-        <Button variant="ghost" onClick={() => navigate("/login")}>Log in</Button>
-      </div>
-      <p className="text-xs text-stone-500">Demo logins (password demo1234): chidinma@demo.gigvault (creator), tolu@demo.gigvault (client).</p>
-    </Shell>
+    <div className="relative flex h-[230px] flex-col justify-end overflow-hidden rounded-[26px] bg-dg p-5">
+      <Strip w={170} h={230} />
+      <div className="absolute left-5 top-5"><Art svg={markLime} size={88} /></div>
+      <div className="absolute right-4 top-4"><ThemeToggle /></div>
+      <h1 className="relative text-[26px] font-extrabold leading-[1.15] tracking-[-0.02em] text-white">
+        {line1}<br /><span className="text-lime">{line2}</span>
+      </h1>
+    </div>
   );
+}
+
+export function Landing() {
+  return <Signup />;
 }
 
 export function Signup() {
@@ -35,24 +41,23 @@ export function Signup() {
   });
 
   return (
-    <Shell tone={role} title={role === "creator" ? "Create your creator account" : "Create your client account"}
-      subtitle={role === "creator" ? "Get booked and paid safely." : "Book creators. Your money is protected until the gig is done."}>
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-stone-100 p-1 text-sm">
-        {(["creator", "client"] as Role[]).map((r) => (
-          <button key={r} onClick={() => setRole(r)}
-            className={`rounded-md py-1.5 font-medium capitalize ${role === r ? "bg-white shadow" : "text-stone-500"}`}>{r}</button>
-        ))}
+    <Screen bottom={<>
+      <Btn onClick={submit} disabled={busy || !f.name || !f.email || f.password.length < 6}>Create account</Btn>
+      <p className="text-sm text-mu">Have an account?{" "}
+        <button className="font-extrabold text-acc underline" onClick={() => navigate(`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`)}>Log in</button>
+      </p>
+    </>}>
+      <AuthHero line1={role === "creator" ? "Get paid before the gig." : "Book creators. Pay safely."} line2={role === "creator" ? "Safely." : "Held till it's done."} />
+      <Seg value={role} onChange={setRole} options={[{ value: "creator", label: "I do gigs" }, { value: "client", label: "I hire" }]} />
+      <div className="flex flex-col gap-3">
+        <Field label="Your name" value={f.name} onChange={(v) => setF({ ...f, name: v })} placeholder="Chidinma Okafor" />
+        <Field label="Email" value={f.email} onChange={(v) => setF({ ...f, email: v })} inputMode="email" placeholder="you@mail.com" />
+        <Field label="Phone" optional value={f.phone} onChange={(v) => setF({ ...f, phone: v })} inputMode="tel" placeholder="+234…" />
+        <Field label="Password" type="password" value={f.password} onChange={(v) => setF({ ...f, password: v })} placeholder="At least 6 characters" />
       </div>
-      <Field label="Full name" value={f.name} onChange={(v) => setF({ ...f, name: v })} />
-      <Field label="Email" value={f.email} onChange={(v) => setF({ ...f, email: v })} inputMode="email" />
-      <Field label="Phone" value={f.phone} onChange={(v) => setF({ ...f, phone: v })} inputMode="tel" placeholder="+234…" />
-      <Field label="Password" type="password" value={f.password} onChange={(v) => setF({ ...f, password: v })} />
       <ErrorNote msg={err} />
-      <Button variant={role === "client" ? "client" : "primary"} onClick={submit} disabled={busy}>Create account</Button>
-      <button className="w-full text-sm text-stone-500" onClick={() => navigate(`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`)}>
-        Already have an account? Log in
-      </button>
-    </Shell>
+      <p className="text-xs text-mu">Demo logins (password demo1234): chidinma@demo.gigvault (creator), tolu@demo.gigvault (client).</p>
+    </Screen>
   );
 }
 
@@ -68,20 +73,23 @@ export function Login() {
     navigate(next || homeFor(s.user.role, !!s.user.worker_id));
   });
   return (
-    <Shell title="Welcome back">
-      <Field label="Email" value={email} onChange={setEmail} inputMode="email" />
-      <Field label="Password" type="password" value={password} onChange={setPassword} />
+    <Screen bottom={<>
+      <Btn onClick={submit} disabled={busy || !email || !password}>Log in</Btn>
+      <p className="text-sm text-mu">New here?{" "}
+        <button className="font-extrabold text-acc underline" onClick={() => navigate(`/signup${next ? `?role=client&next=${encodeURIComponent(next)}` : ""}`)}>Create an account</button>
+      </p>
+    </>}>
+      <AuthHero line1="Welcome back." line2="Your money's safe." />
+      <div className="flex flex-col gap-3">
+        <Field label="Email" value={email} onChange={setEmail} inputMode="email" />
+        <Field label="Password" type="password" value={password} onChange={setPassword} />
+      </div>
       <ErrorNote msg={err} />
-      <Button onClick={submit} disabled={busy}>Log in</Button>
-      <button className="w-full text-sm text-stone-500" onClick={() => navigate(`/signup${next ? `?role=client&next=${encodeURIComponent(next)}` : ""}`)}>
-        New here? Create an account
-      </button>
-    </Shell>
+      <p className="text-xs text-mu">Demo logins (password demo1234): chidinma@demo.gigvault (creator), tolu@demo.gigvault (client).</p>
+    </Screen>
   );
 }
 
 export function LogoutButton() {
-  return (
-    <button className="text-xs text-white/70 underline" onClick={() => { session.clear(); navigate("/"); }}>Log out</button>
-  );
+  return <RoundButton icon="logout" label="Log out" onClick={() => { session.clear(); navigate("/"); }} />;
 }
