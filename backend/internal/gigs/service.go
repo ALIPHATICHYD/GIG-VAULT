@@ -40,7 +40,7 @@ type Service struct {
 
 // MarkFunded runs when Busha confirms the client paid. It is idempotent:
 // a redelivered webhook finds the gig already BOOKED and does nothing.
-func (s *Service) MarkFunded(ctx context.Context, reference string, settledUSDT string) error {
+func (s *Service) MarkFunded(ctx context.Context, reference, settledUSDT, event string) error {
 	return store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(ctx, `SELECT id FROM gigs WHERE payment_reference = $1`, reference).Scan(&id); err != nil {
@@ -70,15 +70,28 @@ func (s *Service) MarkFunded(ctx context.Context, reference string, settledUSDT 
 		if _, err := tx.Exec(ctx, `UPDATE gigs SET amount_usdt_micro = $2 WHERE id = $1`, g.ID, amount); err != nil {
 			return err
 		}
+		if err := store.Audit(ctx, tx, g.ID, g.WorkerID, "busha", "busha.payment_confirmed", "", "",
+			map[string]any{"event": event, "usdt_micro": amount, "ngn_kobo": g.AmountNGNKobo}); err != nil {
+			return err
+		}
 		if _, err := ledger.Move(ctx, tx, "fund:"+g.ID, "fund", g.ID, ledger.ExternalClient, ledger.Escrow(g.ID), amount); err != nil {
 			return err
 		}
 		deposit := bps(amount, g.DepositBps)
-		if _, err := ledger.Move(ctx, tx, "deposit:"+g.ID, "deposit_release", g.ID, ledger.Escrow(g.ID), ledger.Worker(g.WorkerID), deposit); err != nil {
+		if err := setStatus(ctx, tx, g, StatusBooked, "system", "gig.funded",
+			map[string]any{"usdt_micro": amount, "ngn_kobo": g.AmountNGNKobo, "deposit_usdt_micro": deposit}); err != nil {
 			return err
 		}
-		return setStatus(ctx, tx, g, StatusBooked, "busha", "gig.funded",
-			map[string]any{"usdt_micro": amount, "deposit_usdt_micro": deposit})
+		if deposit > 0 {
+			if _, err := ledger.Move(ctx, tx, "deposit:"+g.ID, "deposit_release", g.ID, ledger.Escrow(g.ID), ledger.Worker(g.WorkerID), deposit); err != nil {
+				return err
+			}
+			if err := store.Audit(ctx, tx, g.ID, g.WorkerID, "system", "upfront.released", "", "",
+				map[string]any{"percent": g.DepositBps / 100, "usdt_micro": deposit, "ngn_kobo": g.AmountNGNKobo * int64(g.DepositBps) / 10000}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -174,9 +187,9 @@ func (s *Service) AutoRelease(ctx context.Context, gigID string) error {
 				return nil
 			}
 			return store.Audit(ctx, tx, g.ID, g.WorkerID, "system", "gig.unfrozen_part_released", g.Status, g.Status,
-				map[string]any{"released_usdt_micro": escrow})
+				map[string]any{"released_usdt_micro": escrow, "ngn_kobo": kobo(g, escrow)})
 		}
-		return setStatus(ctx, tx, g, StatusReleased, "system", "gig.auto_released", map[string]any{"released_usdt_micro": escrow})
+		return setStatus(ctx, tx, g, StatusReleased, "system", "gig.auto_released", map[string]any{"released_usdt_micro": escrow, "ngn_kobo": kobo(g, escrow)})
 	})
 }
 
@@ -395,4 +408,38 @@ func (s *Service) Wallet(ctx context.Context, workerID string) (*Wallet, error) 
 		return nil, err
 	}
 	return wl, nil
+}
+
+// kobo converts a USDT amount on this gig back to naira at the gig's own rate.
+func kobo(g *Gig, micro int64) int64 {
+	if g.AmountUSDTMicro == nil || *g.AmountUSDTMicro == 0 {
+		return 0
+	}
+	return g.AmountNGNKobo * micro / *g.AmountUSDTMicro
+}
+
+// Activity is the creator's own feed: every invoice event plus cash-outs.
+func (s *Service) Activity(ctx context.Context, workerID string) ([]ActivityRow, error) {
+	rows, err := s.DB.Query(ctx, `SELECT a.gig_id, g.title, a.actor, a.action, a.to_status, a.details, a.created_at
+		FROM audit_log a LEFT JOIN gigs g ON g.id = a.gig_id
+		WHERE a.worker_id = $1 ORDER BY a.id DESC LIMIT 60`, workerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ActivityRow{}
+	for rows.Next() {
+		var r ActivityRow
+		if err := rows.Scan(&r.GigID, &r.GigTitle, &r.Actor, &r.Action, &r.To, &r.Details, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+type ActivityRow struct {
+	GigID    *string `json:"gig_id"`
+	GigTitle *string `json:"gig_title"`
+	AuditRow
 }

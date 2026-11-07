@@ -106,6 +106,8 @@ func (s *Service) Cashout(ctx context.Context, workerID string, in CashoutInput)
 	if _, err := s.DB.Exec(ctx, `UPDATE payouts SET busha_transfer_id = $2, updated_at = now() WHERE id = $1`, p.ID, t.ID); err != nil {
 		return nil, err
 	}
+	_ = store.Audit(ctx, s.DB, "", workerID, "busha", "busha.transfer_created", "", "",
+		map[string]any{"payout_id": p.ID, "transfer_id": t.ID, "quote_id": q.ID, "ngn_kobo": kobo, "status": t.Status})
 	p.BushaTransferID = &t.ID
 	if t.Mock {
 		// No real webhook will come in mock mode, so simulate the settlement.
@@ -127,7 +129,9 @@ func (s *Service) CompletePayoutByTransfer(ctx context.Context, transferID strin
 		if _, err := tx.Exec(ctx, `UPDATE payouts SET status = 'completed', updated_at = now() WHERE id = $1`, id); err != nil {
 			return err
 		}
-		return store.Audit(ctx, tx, "", worker, "busha", "payout.completed", "processing", "completed", map[string]any{"payout_id": id, "transfer_id": transferID})
+		var k int64
+		_ = tx.QueryRow(ctx, `SELECT amount_ngn_kobo FROM payouts WHERE id = $1`, id).Scan(&k)
+		return store.Audit(ctx, tx, "", worker, "busha", "payout.completed", "processing", "completed", map[string]any{"payout_id": id, "transfer_id": transferID, "ngn_kobo": k})
 	})
 }
 
@@ -236,7 +240,7 @@ func (s *Service) ProcessEvent(ctx context.Context, eventRowID int64) error {
 	var err error
 	switch name {
 	case "payment_request.completed", "deposit.success":
-		err = s.MarkFunded(ctx, d.Reference, d.TargetAmount)
+		err = s.MarkFunded(ctx, d.Reference, d.TargetAmount, name)
 	case "transfer.funds_delivered", "transfer.completed":
 		err = s.CompletePayoutByTransfer(ctx, d.ID)
 	case "transfer.failed", "transfer.funds_not_delivered", "transfer.funds_refunded", "transfer.cancelled":

@@ -125,6 +125,7 @@ export const api = {
   wallet: () => call<Wallet>("/v1/creator/wallet"),
   createGigLink: (d: { title: string; event_at: string; amount_ngn: string; client_name: string; client_email?: string; upfront_percent: number; note?: string }) =>
     post<{ gig: Gig; pay_path: string }>("/v1/creator/gigs", d),
+  activity: () => call<(TimelineEvent & { gig_id: string | null; gig_title: string | null })[]>("/v1/creator/activity"),
   creatorGig: (id: string) => call<GigDetail>(`/v1/creator/gigs/${id}`),
   cashout: (amount_ngn: string) => post("/v1/creator/cashout", { amount_ngn }),
   creatorPropose: (id: string, creator_percent: number) => post(`/v1/creator/gigs/${id}/dispute/propose`, { creator_percent }),

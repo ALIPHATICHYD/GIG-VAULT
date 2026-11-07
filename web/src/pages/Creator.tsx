@@ -90,6 +90,7 @@ export function Onboard() {
 
 export function CreatorHome() {
   const wallet = usePoll(() => api.wallet());
+  const activity = usePoll(() => api.activity(), 3000);
   const [showNew, setShowNew] = useState(false);
   const [amount, setAmount] = useState("");
   const { busy, err, run } = useAction();
@@ -137,6 +138,14 @@ export function CreatorHome() {
               </div>
             ))}
           </section>
+          {activity.data && activity.data.length > 0 && (
+            <details className="rounded-xl border border-stone-200 p-3" open>
+              <summary className="cursor-pointer font-semibold">Activity</summary>
+              <div className="mt-2">
+                <Timeline events={[...activity.data].reverse().slice(-15).map((e) => ({ ...e, action: e.action, actor: e.gig_title ? `${e.actor} · ${e.gig_title}` : e.actor }))} />
+              </div>
+            </details>
+          )}
         </>
       )}
       {showNew && <NewGigModal onClose={() => { setShowNew(false); wallet.refresh(); }} />}

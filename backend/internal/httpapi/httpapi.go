@@ -52,6 +52,7 @@ func (a *API) Router() http.Handler {
 			r.Use(a.Signer.Require(auth.Creator, fail))
 			r.Post("/creator/onboard", a.onboard)
 			r.Get("/creator/wallet", a.creatorWallet)
+			r.Get("/creator/activity", a.creatorActivity)
 			r.Post("/creator/gigs", a.createGigLink)
 			r.Get("/creator/gigs/{id}", a.creatorGig)
 			r.Post("/creator/cashout", a.creatorCashout)
@@ -151,6 +152,16 @@ func (a *API) creatorWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.Svc.Wallet(r.Context(), wid)
 	a.respond(w, r, http.StatusOK, "wallet retrieved", out, err)
+}
+
+func (a *API) creatorActivity(w http.ResponseWriter, r *http.Request) {
+	wid, err := a.Svc.WorkerFor(r.Context(), sess(r).UserID)
+	if err != nil {
+		a.respond(w, r, 0, "", nil, err)
+		return
+	}
+	out, err := a.Svc.Activity(r.Context(), wid)
+	a.respond(w, r, http.StatusOK, "activity", out, err)
 }
 
 func (a *API) createGigLink(w http.ResponseWriter, r *http.Request) {

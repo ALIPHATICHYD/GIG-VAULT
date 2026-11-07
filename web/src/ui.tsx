@@ -117,8 +117,10 @@ const LABELS: Record<string, string> = {
   "invoice.sent": "Invoice sent",
   "invoice.opened": "Client opened the invoice",
   "gig.claimed_by_client": "Client joined",
-  "gig.checkout_started": "Client chose how to pay",
-  "gig.funded": "Payment received and locked",
+  "gig.checkout_started": "Busha payment request created",
+  "busha.payment_confirmed": "Busha confirmed the payment",
+  "gig.funded": "Money locked in escrow",
+  "upfront.released": "Upfront released to the creator",
   "gig.marked_done": "Client confirmed the gig is done",
   "gig.auto_released": "Remaining money released",
   "gig.unfrozen_part_released": "Unfrozen part released",
@@ -128,17 +130,32 @@ const LABELS: Record<string, string> = {
   "dispute.escalated_to_gigvault": "No agreement: GigVault stepped in",
   "dispute.resolved_by_gigvault": "GigVault resolved the dispute",
   "gig.cancelled": "Cancelled",
+  "worker.onboarded": "Creator profile set up on Busha",
+  "payout.requested": "Cash-out requested",
+  "busha.transfer_created": "Busha transfer sent to the bank",
+  "payout.completed": "Money delivered to the bank",
+  "payout.failed_reversed": "Cash-out failed, money returned to wallet",
 };
 
 function detailLine(e: TimelineEvent, amountKobo?: number): string | null {
   const d = (e.details ?? {}) as Record<string, number | string>;
-  if (e.action === "invoice.sent" && amountKobo) return `${naira(amountKobo)} · ${d.upfront_percent}% upfront`;
-  if (e.action === "gig.funded") return `${usdt(d.deposit_usdt_micro as number)} released upfront so work can start`;
-  if (e.action === "dispute.split_proposed") return `${e.actor} proposes ${d.creator_percent}% to the creator`;
-  if (e.action === "gig.dispute_opened") return `"${d.reason}" · ${usdt(d.frozen_usdt_micro as number)} frozen`;
-  if (e.action.startsWith("dispute.settled") || e.action.startsWith("dispute.resolved"))
-    return `${d.creator_percent}% to creator${Number(d.fee_usdt_micro) > 0 ? ` · ${usdt(d.fee_usdt_micro as number)} resolution fee` : ""}`;
-  return null;
+  const n = (k: string) => (Number(d[k]) > 0 ? naira(Number(d[k])) : null);
+  switch (e.action) {
+    case "invoice.sent": return amountKobo ? `${naira(amountKobo)} · ${d.upfront_percent}% upfront` : null;
+    case "gig.checkout_started": return d.currency === "USDT" ? "Paying in USDT from abroad" : "Paying by naira bank transfer";
+    case "busha.payment_confirmed": return `${n("ngn_kobo") ?? ""} received as ${usdt(d.usdt_micro as number)} · webhook ${d.event}`;
+    case "gig.funded": return `${usdt(d.usdt_micro as number)} held for this invoice`;
+    case "upfront.released": return `${n("ngn_kobo")} (${d.percent}%) so work can start`;
+    case "gig.auto_released": case "gig.unfrozen_part_released": return n("ngn_kobo") ? `${n("ngn_kobo")} to the creator` : null;
+    case "dispute.split_proposed": return `${e.actor} proposes ${d.creator_percent}% to the creator`;
+    case "gig.dispute_opened": return `"${d.reason}" · ${usdt(d.frozen_usdt_micro as number)} frozen`;
+    case "dispute.settled_by_agreement": case "dispute.resolved_by_gigvault":
+      return `${d.creator_percent}% to creator${Number(d.fee_usdt_micro) > 0 ? ` · ${usdt(d.fee_usdt_micro as number)} resolution fee` : ""}`;
+    case "payout.requested": return n("ngn_kobo");
+    case "busha.transfer_created": return `${n("ngn_kobo")} · transfer ${d.transfer_id}`;
+    case "payout.completed": return n("ngn_kobo");
+    default: return null;
+  }
 }
 
 export function Timeline({ events, amountKobo, tone = "creator" }: { events: TimelineEvent[]; amountKobo?: number; tone?: "creator" | "client" }) {
