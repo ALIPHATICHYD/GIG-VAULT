@@ -55,6 +55,8 @@ func (a *API) Router() http.Handler {
 			r.Post("/creator/gigs", a.createGigLink)
 			r.Get("/creator/gigs/{id}", a.creatorGig)
 			r.Post("/creator/cashout", a.creatorCashout)
+			r.Post("/creator/gigs/{id}/dispute/propose", a.creatorDispute("propose"))
+			r.Post("/creator/gigs/{id}/dispute/accept", a.creatorDispute("accept"))
 		})
 
 		// Client screens.
@@ -67,12 +69,14 @@ func (a *API) Router() http.Handler {
 			r.Post("/client/bookings/{id}/complete", a.clientAction("complete"))
 			r.Post("/client/bookings/{id}/complaints", a.clientAction("complain"))
 			r.Post("/client/bookings/{id}/cancel", a.clientAction("cancel"))
+			r.Post("/client/bookings/{id}/dispute/propose", a.clientPropose)
+			r.Post("/client/bookings/{id}/dispute/accept", a.clientAction("accept_split"))
 		})
 
 		// Platform admin (X-Admin-Key).
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAdmin)
-			r.Post("/admin/gigs/{id}/complaints/resolve", a.resolve)
+			r.Post("/admin/gigs/{id}/dispute/resolve", a.resolve)
 			r.Get("/admin/reconciliation", a.reconcile)
 		})
 
@@ -186,6 +190,9 @@ func (a *API) creatorCashout(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) previewGig(w http.ResponseWriter, r *http.Request) {
 	out, err := a.Svc.PublicGig(r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("t"))
+	if err == nil {
+		a.Svc.MarkOpened(r.Context(), out.ID)
+	}
 	a.respond(w, r, http.StatusOK, "gig", out, err)
 }
 
@@ -234,17 +241,41 @@ func (a *API) clientAction(action string) http.HandlerFunc {
 	}
 }
 
-// ---------- admin + misc ----------
-
-func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
+func (a *API) clientPropose(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Outcome string `json:"outcome"`
+		CreatorPercent int `json:"creator_percent"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	out, err := a.Svc.ResolveComplaint(r.Context(), chi.URLParam(r, "id"), in.Outcome)
-	a.respond(w, r, http.StatusOK, "complaint resolved", out, err)
+	out, err := a.Svc.ClientProposeSplit(r.Context(), sess(r).UserID, chi.URLParam(r, "id"), in.CreatorPercent)
+	a.respond(w, r, http.StatusOK, "proposal sent", out, err)
+}
+
+func (a *API) creatorDispute(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			CreatorPercent int `json:"creator_percent"`
+		}
+		if r.ContentLength != 0 && !decode(w, r, &in) {
+			return
+		}
+		out, err := a.Svc.CreatorDispute(r.Context(), sess(r).UserID, chi.URLParam(r, "id"), action, in.CreatorPercent)
+		a.respond(w, r, http.StatusOK, "dispute "+action+" done", out, err)
+	}
+}
+
+// ---------- admin + misc ----------
+
+func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		CreatorPercent int `json:"creator_percent"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	out, err := a.Svc.ResolveDispute(r.Context(), chi.URLParam(r, "id"), in.CreatorPercent)
+	a.respond(w, r, http.StatusOK, "dispute resolved by GigVault", out, err)
 }
 
 func (a *API) banks(w http.ResponseWriter, r *http.Request) {

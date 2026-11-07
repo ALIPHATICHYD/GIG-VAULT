@@ -80,6 +80,15 @@ func run(log *slog.Logger) error {
 			}
 			return svc.AutoRelease(ctx, in.GigID)
 		},
+		gigs.JobEscalateDispute: func(ctx context.Context, p json.RawMessage) error {
+			var in struct {
+				GigID string `json:"gig_id"`
+			}
+			if err := json.Unmarshal(p, &in); err != nil {
+				return err
+			}
+			return svc.EscalateDispute(ctx, in.GigID)
+		},
 		gigs.JobMockSettlement: func(ctx context.Context, p json.RawMessage) error {
 			var in struct {
 				TransferID string `json:"transfer_id"`

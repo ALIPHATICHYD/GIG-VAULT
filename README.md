@@ -1,119 +1,147 @@
 # GigVault
 
-Escrow for creative gig workers, built on Busha. Busha Build Day, 7 Nov 2026.
+**Invoices for creators, with the money held safely until the work is done.** Built on Busha for Busha Build Day (7 Nov 2026).
 
-Chidinma does nails on weekdays, sings at weddings on weekends and picks up dance gigs. Platforms pay late, and sometimes clients don't pay at all. GigVault locks the client's money **before** the gig and releases it the moment the gig is done.
+Chidinma sings at weddings, does nails and makes brand content. Today she sends an invoice with her account number and hopes the client pays. With GigVault:
 
-1. **Client books and pays upfront**, in naira by bank transfer or in USDT from abroad (a Busha payment request).
-2. **Busha settles it as USDT**, tagged to the gig. Our ledger holds it in escrow.
-3. **25% goes to Chidinma at booking** for materials and transport.
-4. **Client marks the gig done.** A complaint window starts (6h in production, 60s in the demo).
-5. **No complaint means auto-release.** A complaint freezes part of the money until it's settled; the rest still releases.
-6. **Late cancel?** The deposit stays with her.
-7. **She sees everything in naira** and cashes out to her bank in one transfer (Busha quote + transfer to a bank recipient).
+1. **She sends an invoice** to a client by name: amount, what it's for, and how much she needs **upfront to start work** (0 to 70%, default 20%).
+2. **The client opens the link**, signs up or logs in, and sees it under **Pending payments**.
+3. **The client pays** by naira bank transfer or USDT from abroad (a Busha payment request). Busha settles it as USDT and GigVault holds it, tagged to the invoice.
+4. **The upfront % goes to her straight away.**
+5. **The client confirms the work is done** and the rest is released. A short complaint window protects the client.
+6. **Disputes:** part of the money is frozen. Both sides get **3 days** to agree a split for free. If they can't, **GigVault decides and keeps a 10% resolution fee**. Frozen money never goes back on its own.
+7. **She cashes out** to her bank in naira (Busha quote + transfer).
 
-## Architecture
+Both sides see the same **timeline**, from "invoice sent" to "paid out".
+
+---
+
+## Run it in 5 steps
+
+You need: **Go 1.23+**, **Node 20+**, a free **[Neon](https://neon.tech)** Postgres database.
+
+**1. Clone**
+```bash
+git clone https://github.com/ALIPHATICHYD/GIG-VAULT.git && cd GIG-VAULT
+```
+
+**2. Database.** In Neon, create a project, then copy the connection string.
+
+**3. Backend**
+```bash
+cp backend/.env.example backend/.env
+# open backend/.env and paste your Neon string into DATABASE_URL
+make api          # http://localhost:8080/healthz should say "ok"
+```
+Tables are created automatically. It starts in **mock mode** (yellow MOCK BUSHA badge) so you can work before you have Busha keys.
+
+**4. Frontend** (new terminal)
+```bash
+cp web/.env.example web/.env
+make web          # open http://localhost:5173
+```
+
+**5. Log in with the demo accounts** (password `demo1234`)
+- Creator: `chidinma@demo.gigvault`
+- Client: `tolu@demo.gigvault`
+
+Use two browsers (or one normal + one incognito) so you can be both at once.
+
+### Switch to the real Busha sandbox
+
+In `backend/.env`:
+```
+BUSHA_MODE=live
+BUSHA_SECRET_KEY=...        # Busha dashboard > Settings > Developer tools > API Tokens
+BUSHA_WEBHOOK_SECRET=...    # Busha dashboard > Settings > Developer tools > Webhooks
+```
+Busha can't send webhooks to localhost, so run `make tunnel` (cloudflared) and register `https://<your-tunnel>/v1/webhooks/busha` in the dashboard.
+
+### Demo settings
+
+For a live demo, shorten the timers in `backend/.env`:
+```
+COMPLAINT_WINDOW=60s
+DISPUTE_WINDOW=2m
+```
+
+---
+
+## Who does what in the code
+
+| Person | Folder | What's there |
+|---|---|---|
+| Abdullah | `backend/internal/busha/` | Busha API client, webhook signature check, mock |
+| Peter | `backend/internal/gigs/`, `backend/internal/ledger/` | Invoices, escrow rules, disputes, ledger, wallet, cash-out |
+| ALIPHATIC | `web/src/pages/` | `Creator.tsx`, `Client.tsx`, `Auth.tsx` screens; shared UI in `web/src/ui.tsx` |
+
+Run the backend checks with `make test`.
+
+---
+
+## How it's built
 
 ```
-React (Vite + Tailwind)  ──►  Go API (chi)  ──►  Postgres on Neon
-                                │   ▲             ├─ gigs (state machine)
-                                │   │             ├─ ledger_txns / ledger_entries (double-entry, append-only)
-                                │   │             ├─ busha_events (raw webhooks, unique per event)
-                                │   │             ├─ jobs (queue: FOR UPDATE SKIP LOCKED)
-                                ▼   │             └─ audit_log
-                         Busha Business API      worker goroutine: process webhooks, auto-release on timer
-                         ◄── signed webhooks (X-BU-SIGNATURE, HMAC-SHA256)
+React + Vite + Tailwind  ──►  Go API (chi)  ──►  Postgres (Neon)
+                                  │                ├─ users (creator | client)
+                                  │                ├─ gigs = invoices (state machine)
+                                  │                ├─ ledger (double-entry, append-only)
+                                  │                ├─ complaints (disputes)
+                                  │                ├─ busha_events (raw webhooks, de-duplicated)
+                                  │                ├─ jobs (queue: auto-release, escalation, webhooks)
+                                  ▼                └─ audit_log (the timeline)
+                         Busha Business API  ◄── signed webhooks
 ```
 
-**Why it's safe with money**
-- Busha has no "escrow" product. The escrow is **our double-entry ledger** on top of Busha balances. Every movement is one debit plus one credit, with an idempotency key. A database trigger makes ledger rows append-only.
-- Webhooks are verified, stored raw, de-duplicated by `(event, reference)`, then processed by the worker. Redelivery is a no-op.
-- Cash-out reserves funds first, then calls Busha. If the transfer fails, the reservation is reversed automatically.
-- `GET /v1/admin/reconciliation` compares what the ledger says we hold with `GET /v1/balances` on Busha.
-- Integer minor units everywhere (kobo, micro-USDT). No floats for money.
+- **Escrow is our ledger.** Busha has no escrow product, so every naira is tracked as a debit + credit in our own append-only ledger on top of Busha balances. A database trigger blocks edits and deletes.
+- **Webhooks are safe to replay.** Verified with `X-BU-SIGNATURE` (HMAC-SHA256), stored raw, de-duplicated, then processed by a background worker.
+- **Cash-out can't lose money.** Funds are reserved first; if Busha's transfer fails, they're put back automatically.
+- **Reconciliation:** `GET /v1/admin/reconciliation` compares our ledger with Busha's `GET /v1/balances`.
+- **Each side only sees its own screens.** Wrong role = 403; someone else's invoice = 404.
 
-## Busha APIs used
+### Busha APIs used
 
-| Purpose | Endpoint |
+| Step | Busha endpoint |
 |---|---|
-| Client pays (NGN temporary bank account or USDT address) | `POST /v1/payments/requests` |
-| Payment confirmed | webhook `payment_request.completed` / `deposit.success` |
-| Rates and cash-out conversion | `POST /v1/quotes` (USDT→NGN, `pay_out: bank_transfer`) |
-| Execute cash-out | `POST /v1/transfers` + webhooks `transfer.funds_delivered` / `transfer.failed` |
-| Bank list and account check | `GET /v1/banks`, `POST /v1/recipients/resolve-bank-account`, `POST /v1/recipients` |
+| Onboarding: list banks, check account name | `GET /v1/banks`, `POST /v1/recipients/resolve-bank-account` |
+| Onboarding: save payout account | `POST /v1/recipients` |
+| Onboarding: identity | `POST /v1/customers`, `POST /v1/customers/{id}/kyc-link` |
+| Client pays (NGN bank transfer or USDT priced in NGN) | `POST /v1/payments/requests` |
+| Payment confirmed | webhooks `payment_request.completed`, `deposit.success` |
+| Cash out to bank | `POST /v1/quotes` (USDT→NGN, `pay_out: bank_transfer`), `POST /v1/transfers`, webhooks `transfer.*` |
 | Reconciliation | `GET /v1/balances` |
 
-Client code: `backend/internal/busha/client.go`. A clearly labelled mock (`BUSHA_MODE=mock`) lets the UI run when the sandbox is unreachable.
+### API
 
-## Run it
+Responses look like Busha's: `{"status": "success"|"error", "message": "...", "data": ..., "code": "..."}`. Log in to get a token, then send `Authorization: Bearer <token>`.
 
-Needs Go 1.23+, Node 20+, a Neon Postgres database, and (for real webhooks) cloudflared or ngrok.
-
-```bash
-# 1. Database: create a Neon project, copy its connection string
-cp backend/.env.example backend/.env       # paste DATABASE_URL, Busha keys
-
-# 2. API + worker (migrations run automatically on start)
-make api                                    # http://localhost:8080/healthz
-
-# 3. Web
-cp web/.env.example web/.env
-make web                                    # http://localhost:5173
-
-# 4. Busha webhooks (they can't reach localhost)
-make tunnel                                 # register https://<tunnel>/v1/webhooks/busha in the Busha dashboard
-```
-
-## Who sees what
-
-One account system with two roles. Each role only ever sees its own screens.
-
-| Role | Screens | How they get in |
+| Who | Method and path | What it does |
 |---|---|---|
-| Creator | `/onboard` (craft, BVN/NIN, bank via Busha) → `/app` wallet → **New gig link** modal → `/app/gigs/:id` (who booked, timeline, ledger) | Sign up as creator |
-| Client | `/pay/:id?t=…` preview → sign up / log in → `/bookings` → `/bookings/:id` (pay, mark done, complain, cancel) | Opens the link the creator sent (WhatsApp, copy) |
+| anyone | `POST /v1/auth/signup`, `POST /v1/auth/login` | `role`: `creator` or `client` |
+| creator | `POST /v1/creator/onboard` | Bank, BVN/NIN, Busha recipient + KYC link |
+| creator | `GET /v1/creator/wallet` | Withdrawable, locked, frozen (in naira) |
+| creator | `POST /v1/creator/gigs` | Send an invoice: `client_name`, `client_email`, `amount_ngn`, `upfront_percent`, `title`, `event_at` |
+| creator | `GET /v1/creator/gigs/{id}` | Client, timeline, ledger |
+| creator | `POST /v1/creator/gigs/{id}/dispute/propose` · `/accept` | Agree a split |
+| creator | `POST /v1/creator/cashout` | `{"amount_ngn": "50000"}` |
+| anyone with link | `GET /v1/pay/{id}?t=` | Invoice preview |
+| client | `POST /v1/client/claim/{id}` | Add a linked invoice to the account |
+| client | `GET /v1/client/bookings` | Pending payments and paid invoices |
+| client | `POST /v1/client/bookings/{id}/checkout` | Pay: `{"currency": "NGN"}` or `"USDT"` |
+| client | `POST /v1/client/bookings/{id}/complete` · `/complaints` · `/cancel` | Done, dispute, cancel |
+| client | `POST /v1/client/bookings/{id}/dispute/propose` · `/accept` | Agree a split |
+| admin (`X-Admin-Key`) | `POST /v1/admin/gigs/{id}/dispute/resolve` | After 3 days: `{"creator_percent": 50}`, 10% fee |
+| admin | `GET /v1/admin/reconciliation` | Ledger vs Busha |
+| Busha | `POST /v1/webhooks/busha` | Signed webhooks |
+| dev only | `POST /v1/dev/gigs/{id}/simulate-payment` | Fake a signed payment webhook |
 
-Both sides know each other: the client sees the creator's name, craft and verified badge; the creator sees the client's name and email once they join. The link token proves the client was invited, and the first client to open it owns the booking.
+---
 
-Demo logins (password `demo1234`): `chidinma@demo.gigvault` (creator), `tolu@demo.gigvault` (client).
+## 3-minute demo script
 
-## API
-
-Busha-style envelope: `{"status": "success"|"error", "message": "...", "data": ..., "code": "..."}`. Auth: `Authorization: Bearer <token>` from sign-up or login.
-
-| Method | Path | Who | What it does |
-|---|---|---|---|
-| POST | `/v1/auth/signup` · `/v1/auth/login` | anyone | `role`: creator or client |
-| POST | `/v1/banks/resolve` · GET `/v1/banks` | anyone | Busha bank list and account-name check |
-| POST | `/v1/creator/onboard` | creator | Busha recipient + Busha customer + KYC link |
-| GET | `/v1/creator/wallet` | creator | Available / locked / frozen, in naira |
-| POST | `/v1/creator/gigs` | creator | Create a gig link to send to the client |
-| GET | `/v1/creator/gigs/{id}` | creator | Client, audit timeline, ledger |
-| POST | `/v1/creator/cashout` | creator | Busha quote + transfer to her bank |
-| GET | `/v1/pay/{id}?t=` | anyone with link | Gig preview |
-| POST | `/v1/client/claim/{id}` | client | Add the linked gig to My bookings |
-| GET | `/v1/client/bookings[/{id}]` | client | Bookings |
-| POST | `/v1/client/bookings/{id}/checkout` | client | Busha payment request (NGN bank transfer or USDT) |
-| POST | `/v1/client/bookings/{id}/complete` · `/complaints` · `/cancel` | client | Done, complain, cancel |
-| POST | `/v1/admin/gigs/{id}/complaints/resolve` | admin key | `{"outcome":"worker"|"client"}` |
-| GET | `/v1/admin/reconciliation` | admin key | Ledger vs Busha balances |
-| POST | `/v1/webhooks/busha` | Busha | Signed webhooks |
-| POST | `/v1/dev/gigs/{id}/simulate-payment` | dev only | Sends a signed payment webhook through the real path |
-
-Errors use real HTTP codes: 400 validation, 401 not logged in or bad webhook signature, 403 wrong role, 404 not found (also for gigs that aren't yours), 409 invalid state or insufficient funds, 422 bank account not verified, 502 Busha error.
-
-## Demo script (3 minutes)
-
-1. **Problem (30s):** Chidinma, 51% of Nigerian creatives deal with payment disputes, banks won't escrow a ₦30,000 nail appointment.
-2. **Creator phone (30s):** Chidinma taps *New gig link*, "Saturday wedding, ₦120,000", sends it on WhatsApp.
-3. **Judge's phone (45s):** opens the link, sees who they're booking and the protection rules, signs up as a client, pays via Busha. Status turns *Locked*.
-4. **Creator phone (20s):** "₦120,000 locked", ₦30,000 deposit already withdrawable.
-5. **Judge marks done (30s):** countdown hits zero and the money lands in Chidinma's wallet. No one pressed anything.
-6. **Cash out (15s):** to GTBank via a Busha quote + transfer.
-7. **Gig detail (20s):** audit trail, double-entry ledger, reconciliation against Busha. Mention duplicate webhooks are ignored.
-
-## Team
-
-- Abdullah: Busha integration and webhooks
-- Peter: ledger, state machine, worker
-- ALIPHATIC: frontend, design, pitch
+1. **Problem (30s):** creators chase payments; 51% of Nigerian creatives deal with payment disputes; banks won't escrow a ₦30,000 job.
+2. **Creator phone (30s):** Chidinma sends an invoice: "Instagram campaign: 3 reels, ₦150,000, 50% upfront". She shares it on WhatsApp.
+3. **Judge's phone (45s):** opens the link and signs up as a client. The invoice is under Pending payments. They pay through Busha and it shows "Locked".
+4. **Creator phone (15s):** ₦75,000 is already withdrawable. The rest shows as locked.
+5. **Dispute (30s):** the judge raises "only 2 of 3 reels". Chidinma proposes 70/30 and the judge accepts. It settles at no fee, and the timeline shows every step.
+6. **Close (30s):** cash out to bank through Busha; show the ledger and reconciliation. If they can't agree within 3 days, GigVault decides and earns 10%. That's the business model.

@@ -3,7 +3,7 @@ const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 export type Role = "creator" | "client";
 export type GigStatus =
-  | "AWAITING_PAYMENT" | "BOOKED" | "DONE_PENDING" | "DISPUTED"
+  | "AWAITING_PAYMENT" | "BOOKED" | "DONE_PENDING" | "DISPUTED" | "ESCALATED"
   | "RELEASED" | "PARTIALLY_REFUNDED" | "CANCELLED";
 
 export interface User { id: string; email: string; name: string; phone: string | null; role: Role; worker_id: string | null }
@@ -18,6 +18,7 @@ export interface Gig {
   amount_usdt_micro: number | null;
   status: GigStatus;
   release_at: string | null;
+  deposit_bps: number;
 }
 
 export interface Wallet {
@@ -32,13 +33,27 @@ export interface Wallet {
   busha_mode: "mock" | "live";
 }
 
+export interface TimelineEvent { actor: string; action: string; to_status: string | null; details: Record<string, unknown> | null; created_at: string }
+
+export interface Dispute {
+  id: string;
+  reason: string;
+  frozen_usdt_micro: number;
+  status: "open" | "settled" | "escalated" | "resolved";
+  negotiate_until: string | null;
+  proposal_creator_percent: number | null;
+  proposed_by: "creator" | "client" | null;
+  outcome_creator_percent: number | null;
+  fee_usdt_micro: number;
+}
+
 export interface GigDetail {
   gig: Gig;
   pay_path: string;
   balances_usdt_micro: { escrow: number; frozen: number };
   ledger: { txn_id: string; kind: string; account: string; direction: string; amount_usdt_micro: number }[];
-  audit: { actor: string; action: string; to_status: string | null; created_at: string }[];
-  complaints: { id: string; reason: string; frozen_usdt_micro: number; status: string }[];
+  audit: TimelineEvent[];
+  complaints: Dispute[];
 }
 
 export interface PublicGig {
@@ -58,6 +73,9 @@ export interface PublicGig {
   freeze_percent: number;
   complaint_window_seconds: number;
   creator: { name: string; craft: string | null; verified: boolean };
+  timeline: TimelineEvent[];
+  dispute: Dispute | null;
+  dispute_fee_percent: number;
   busha_mode: "mock" | "live";
 }
 
@@ -105,10 +123,12 @@ export const api = {
   onboard: (d: Record<string, string>) => post<{ worker: Wallet["worker"]; kyc_link: string | null; notes: string[] }>("/v1/creator/onboard", d),
   // creator
   wallet: () => call<Wallet>("/v1/creator/wallet"),
-  createGigLink: (d: { title: string; event_at: string; amount_ngn: string; client_name?: string; note?: string }) =>
+  createGigLink: (d: { title: string; event_at: string; amount_ngn: string; client_name: string; client_email?: string; upfront_percent: number; note?: string }) =>
     post<{ gig: Gig; pay_path: string }>("/v1/creator/gigs", d),
   creatorGig: (id: string) => call<GigDetail>(`/v1/creator/gigs/${id}`),
   cashout: (amount_ngn: string) => post("/v1/creator/cashout", { amount_ngn }),
+  creatorPropose: (id: string, creator_percent: number) => post(`/v1/creator/gigs/${id}/dispute/propose`, { creator_percent }),
+  creatorAccept: (id: string) => post(`/v1/creator/gigs/${id}/dispute/accept`),
   // public + client
   preview: (id: string, t: string) => call<PublicGig>(`/v1/pay/${id}?t=${encodeURIComponent(t)}`),
   claim: (id: string, token: string) => post<PublicGig>(`/v1/client/claim/${id}`, { token }),
@@ -118,6 +138,8 @@ export const api = {
   complete: (id: string) => post<PublicGig>(`/v1/client/bookings/${id}/complete`),
   complain: (id: string, reason: string) => post<PublicGig>(`/v1/client/bookings/${id}/complaints`, { reason }),
   cancel: (id: string) => post<PublicGig>(`/v1/client/bookings/${id}/cancel`),
+  clientPropose: (id: string, creator_percent: number) => post<PublicGig>(`/v1/client/bookings/${id}/dispute/propose`, { creator_percent }),
+  clientAccept: (id: string) => post<PublicGig>(`/v1/client/bookings/${id}/dispute/accept`),
   // dev
   simulatePayment: (id: string) => post(`/v1/dev/gigs/${id}/simulate-payment`),
 };

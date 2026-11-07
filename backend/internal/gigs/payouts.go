@@ -172,6 +172,7 @@ type Reconciliation struct {
 	EscrowUSDT         int64           `json:"escrow_usdt_micro"`
 	FrozenUSDT         int64           `json:"frozen_usdt_micro"`
 	WorkerBalancesUSDT int64           `json:"worker_balances_usdt_micro"`
+	PlatformFeesUSDT   int64           `json:"platform_fees_usdt_micro"`
 	BushaUSDT          *string         `json:"busha_usdt_total"`
 	BushaBalances      []busha.Balance `json:"busha_balances"`
 	BushaError         *string         `json:"busha_error,omitempty"`
@@ -187,6 +188,9 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 		return nil, err
 	}
 	if r.WorkerBalancesUSDT, err = ledger.SumPrefix(ctx, s.DB, "worker:"); err != nil {
+		return nil, err
+	}
+	if r.PlatformFeesUSDT, err = ledger.Balance(ctx, s.DB, PlatformFees); err != nil {
 		return nil, err
 	}
 	r.LedgerOwedUSDT = r.EscrowUSDT + r.FrozenUSDT + r.WorkerBalancesUSDT

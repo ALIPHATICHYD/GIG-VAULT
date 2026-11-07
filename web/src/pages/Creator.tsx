@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, naira, session, usdt, type Gig } from "../api";
 import { navigate } from "../router";
-import { Button, Countdown, ErrorNote, Field, ModeBadge, Shell, StatusChip, useAction, usePoll } from "../ui";
+import { Button, Countdown, DisputePanel, ErrorNote, Field, ModeBadge, Shell, StatusChip, Timeline, useAction, usePoll } from "../ui";
 import { LogoutButton } from "./Auth";
 
 // ---------------- Onboarding: 3 steps ----------------
@@ -113,11 +113,11 @@ export function CreatorHome() {
             </div>
           </section>
 
-          <Button onClick={() => setShowNew(true)}>+ New gig link</Button>
+          <Button onClick={() => setShowNew(true)}>+ New invoice</Button>
 
           <section className="space-y-2">
-            <h3 className="font-semibold">Your gigs</h3>
-            {w.gigs.length === 0 && <p className="text-sm text-stone-500">No gigs yet. Agree a price with a client, then create a gig link.</p>}
+            <h3 className="font-semibold">Invoices</h3>
+            {w.gigs.length === 0 && <p className="text-sm text-stone-500">No invoices yet. Agree a price with a client, then send them an invoice.</p>}
             {w.gigs.map((g) => <GigRow key={g.id} g={g} />)}
           </section>
 
@@ -149,7 +149,7 @@ function GigRow({ g }: { g: Gig }) {
     <button onClick={() => navigate(`/app/gigs/${g.id}`)} className="flex w-full items-center justify-between rounded-xl border border-stone-200 p-3 text-left">
       <div>
         <p className="font-medium">{g.title}</p>
-        <p className="text-xs text-stone-500">{naira(g.amount_ngn_kobo)} · {g.client_name ?? "client not joined yet"} · {fmtDate(g.event_at)}</p>
+        <p className="text-xs text-stone-500">{naira(g.amount_ngn_kobo)} · {g.client_name ?? "client"} · {fmtDate(g.event_at)}</p>
         {g.status === "DONE_PENDING" && <Countdown until={g.release_at} label="Paying out in" small />}
       </div>
       <StatusChip status={g.status} />
@@ -157,41 +157,59 @@ function GigRow({ g }: { g: Gig }) {
   );
 }
 
-// ---------------- New gig modal: creates the link to send ----------------
+// ---------------- New invoice modal: creates the link to send ----------------
+
+const UPFRONT_CHOICES = [0, 20, 30, 50, 70];
 
 function NewGigModal({ onClose }: { onClose: () => void }) {
-  const [f, setF] = useState({ title: "", client_name: "", amount_ngn: "", event_at: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 16), note: "" });
+  const [f, setF] = useState({ title: "", client_name: "", client_email: "", amount_ngn: "", event_at: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 16), note: "" });
+  const [upfront, setUpfront] = useState(20);
   const [link, setLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const { busy, err, run } = useAction();
+  const amount = Number(f.amount_ngn) || 0;
 
   const create = () => run(async () => {
-    const r = await api.createGigLink({ ...f, event_at: new Date(f.event_at).toISOString() });
+    const r = await api.createGigLink({ ...f, upfront_percent: upfront, event_at: new Date(f.event_at).toISOString() });
     setLink(window.location.origin + r.pay_path);
   });
-  const wa = link ? `https://wa.me/?text=${encodeURIComponent(`Hi${f.client_name ? " " + f.client_name : ""}, here's the secure payment link for "${f.title}" (${naira(Number(f.amount_ngn) * 100)}). Your money is held safely until the gig is done: ${link}`)}` : "";
+  const wa = link ? `https://wa.me/?text=${encodeURIComponent(`Hi ${f.client_name}, here's my invoice for "${f.title}" (${naira(amount * 100)}). Pay securely on GigVault: your money is held safely until the work is done. ${link}`)}` : "";
 
   return (
     <div className="fixed inset-0 z-10 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
-      <div className="w-full max-w-md space-y-3 rounded-t-2xl bg-white p-5 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[92vh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-5 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{link ? "Send this link to your client" : "New gig link"}</h2>
+          <h2 className="text-lg font-semibold">{link ? "Invoice ready. Send it to your client" : "New invoice"}</h2>
           <button onClick={onClose} className="text-stone-400">✕</button>
         </div>
         {!link && (
           <>
-            <Field label="Gig" placeholder="Saturday wedding: lead vocals" value={f.title} onChange={(v) => setF({ ...f, title: v })} />
-            <Field label="Client name (optional)" value={f.client_name} onChange={(v) => setF({ ...f, client_name: v })} />
-            <Field label="Agreed price (₦)" inputMode="decimal" value={f.amount_ngn} onChange={(v) => setF({ ...f, amount_ngn: v })} />
-            <Field label="Date and time" type="datetime-local" value={f.event_at} onChange={(v) => setF({ ...f, event_at: v })} />
-            <Field label="Note for the client (optional)" value={f.note} onChange={(v) => setF({ ...f, note: v })} />
+            <Field label="Client name" value={f.client_name} onChange={(v) => setF({ ...f, client_name: v })} />
+            <Field label="Client email (optional, it shows up in their account)" inputMode="email" value={f.client_email} onChange={(v) => setF({ ...f, client_email: v })} />
+            <Field label="What is it for?" placeholder="Instagram campaign: 3 reels" value={f.title} onChange={(v) => setF({ ...f, title: v })} />
+            <Field label="Amount (₦)" inputMode="decimal" value={f.amount_ngn} onChange={(v) => setF({ ...f, amount_ngn: v })} />
+            <Field label="Date of the gig / delivery" type="datetime-local" value={f.event_at} onChange={(v) => setF({ ...f, event_at: v })} />
+            <div className="text-sm">
+              <p className="text-stone-500">Upfront to start work</p>
+              <div className="mt-1 grid grid-cols-5 gap-1">
+                {UPFRONT_CHOICES.map((p) => (
+                  <button key={p} onClick={() => setUpfront(p)}
+                    className={`rounded-lg border py-2 font-semibold ${upfront === p ? "border-vault-700 bg-vault-700 text-white" : "border-stone-300"}`}>{p}%</button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-stone-500">
+                {amount > 0 ? `${naira(amount * upfront)} comes to you as soon as they pay. The other ${naira(amount * (100 - upfront))} is released when they confirm the work is done.` : "Paid to you the moment the client pays, for materials and transport."}
+              </p>
+            </div>
+            <Field label="Note (optional)" value={f.note} onChange={(v) => setF({ ...f, note: v })} />
             <ErrorNote msg={err} />
-            <Button onClick={create} disabled={busy || !f.title || !f.amount_ngn}>Create link</Button>
+            <Button onClick={create} disabled={busy || !f.title || !f.amount_ngn || !f.client_name}>Create invoice</Button>
           </>
         )}
         {link && (
           <>
             <p className="break-all rounded-lg bg-stone-100 p-3 font-mono text-xs">{link}</p>
+            {f.client_email && <p className="text-xs text-stone-500">It will also appear under Pending payments when {f.client_name} logs in with {f.client_email}.</p>}
             <div className="grid grid-cols-2 gap-2">
               <Button variant="ghost" onClick={() => { navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? "Copied ✓" : "Copy link"}</Button>
               <a href={wa} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366] px-4 py-3 text-center font-semibold text-white">WhatsApp</a>
@@ -207,9 +225,12 @@ function NewGigModal({ onClose }: { onClose: () => void }) {
 // ---------------- Creator gig detail: who booked, timeline, ledger ----------------
 
 export function CreatorGig({ id }: { id: string }) {
-  const d = usePoll(() => api.creatorGig(id), 2000, [id]).data;
+  const p = usePoll(() => api.creatorGig(id), 2000, [id]);
+  const d = p.data;
+  const { busy, err, run } = useAction();
+  const dispute = d?.complaints.length ? d.complaints[d.complaints.length - 1] : null;
   return (
-    <Shell title={d?.gig.title ?? "Gig"} subtitle={d ? `${naira(d.gig.amount_ngn_kobo)} · ${fmtDate(d.gig.event_at)}` : undefined}
+    <Shell title={d?.gig.title ?? "Invoice"} subtitle={d ? `${naira(d.gig.amount_ngn_kobo)} · ${d.gig.deposit_bps / 100}% upfront · ${fmtDate(d.gig.event_at)}` : undefined}
       right={<button className="text-sm text-white/80" onClick={() => navigate("/app")}>← Wallet</button>}>
       {d && (
         <>
@@ -225,18 +246,16 @@ export function CreatorGig({ id }: { id: string }) {
             <p className="break-all rounded-lg bg-stone-100 p-3 font-mono text-xs">{window.location.origin + d.pay_path}</p>
           )}
           {d.gig.status === "DONE_PENDING" && <Countdown until={d.gig.release_at} label="Paying out to you in" />}
-          <ol className="relative space-y-3 border-l-2 border-vault-100 pl-4">
-            {d.audit.map((a, i) => (
-              <li key={i}>
-                <span className="absolute -left-[7px] mt-1.5 h-3 w-3 rounded-full bg-vault-500" />
-                <p className="text-sm font-medium">{a.action.replace("gig.", "").replaceAll("_", " ")}</p>
-                <p className="text-xs text-stone-500">{new Date(a.created_at).toLocaleTimeString()} · by {a.actor}</p>
-              </li>
-            ))}
-          </ol>
-          <div>
-            <h3 className="mb-1 text-sm font-semibold">Ledger (double-entry, append-only)</h3>
-            <table className="w-full text-xs"><tbody>
+          {dispute && (d.gig.status === "DISPUTED" || d.gig.status === "ESCALATED") && (
+            <DisputePanel dispute={dispute} me="creator" feePercent={10} busy={busy}
+              onPropose={(pct) => run(async () => { await api.creatorPropose(id, pct); p.refresh(); })}
+              onAccept={() => run(async () => { await api.creatorAccept(id); p.refresh(); })} />
+          )}
+          <ErrorNote msg={err} />
+          <Timeline events={d.audit} amountKobo={d.gig.amount_ngn_kobo} />
+          <details className="text-xs">
+            <summary className="cursor-pointer font-semibold">Ledger (double-entry, append-only)</summary>
+            <table className="mt-1 w-full"><tbody>
               {d.ledger.map((e, i) => (
                 <tr key={i} className="border-b border-stone-100">
                   <td className="py-1">{e.kind}</td>
@@ -246,7 +265,7 @@ export function CreatorGig({ id }: { id: string }) {
                 </tr>
               ))}
             </tbody></table>
-          </div>
+          </details>
         </>
       )}
     </Shell>

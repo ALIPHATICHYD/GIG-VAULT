@@ -203,6 +203,8 @@ func (s *Service) ClientAction(ctx context.Context, userID, gigID, action, reaso
 		_, err = s.Complain(ctx, gigID, reason)
 	case "cancel":
 		_, err = s.Cancel(ctx, gigID)
+	case "accept_split":
+		err = s.AcceptSplit(ctx, gigID, "client")
 	default:
 		return nil, badRequest("validation_error", "unknown action")
 	}
@@ -213,6 +215,11 @@ func (s *Service) ClientAction(ctx context.Context, userID, gigID, action, reaso
 }
 
 func (s *Service) ClientBookings(ctx context.Context, userID string) ([]*PublicGig, error) {
+	// Invoices addressed to this client's email show up without needing the link.
+	if _, err := s.DB.Exec(ctx, `UPDATE gigs g SET client_user_id = u.id FROM users u
+		WHERE u.id = $1 AND g.client_user_id IS NULL AND g.client_email = lower(u.email)`, userID); err != nil {
+		return nil, err
+	}
 	rows, err := s.DB.Query(ctx, `SELECT id, client_token FROM gigs WHERE client_user_id = $1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -237,6 +244,35 @@ func (s *Service) ClientBookings(ctx context.Context, userID string) ([]*PublicG
 		out = append(out, g)
 	}
 	return out, nil
+}
+
+// ClientProposeSplit lets the client propose a split of the frozen money.
+func (s *Service) ClientProposeSplit(ctx context.Context, userID, gigID string, pct int) (*PublicGig, error) {
+	g, err := s.ownClientGig(ctx, userID, gigID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ProposeSplit(ctx, gigID, "client", pct); err != nil {
+		return nil, err
+	}
+	return s.PublicGig(ctx, gigID, g.ClientToken)
+}
+
+// CreatorDispute lets the creator propose or accept a split on her own gig.
+func (s *Service) CreatorDispute(ctx context.Context, userID, gigID, action string, pct int) (*GigDetail, error) {
+	if _, err := s.CreatorGig(ctx, userID, gigID); err != nil {
+		return nil, err
+	}
+	var err error
+	if action == "propose" {
+		err = s.ProposeSplit(ctx, gigID, "creator", pct)
+	} else {
+		err = s.AcceptSplit(ctx, gigID, "creator")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetGig(ctx, gigID)
 }
 
 var _ = forbidden

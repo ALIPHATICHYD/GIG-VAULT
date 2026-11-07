@@ -23,9 +23,10 @@ import (
 
 // Job kinds handled by the worker.
 const (
-	JobBushaEvent     = "busha_event"
-	JobAutoRelease    = "auto_release"
-	JobMockSettlement = "mock_transfer_settle"
+	JobBushaEvent      = "busha_event"
+	JobAutoRelease     = "auto_release"
+	JobMockSettlement  = "mock_transfer_settle"
+	JobEscalateDispute = "escalate_dispute"
 )
 
 type Service struct {
@@ -130,12 +131,16 @@ func (s *Service) Complain(ctx context.Context, gigID, reason string) (*Gig, err
 		if _, err := ledger.Move(ctx, tx, "freeze:"+g.ID, "freeze", g.ID, ledger.Escrow(g.ID), ledger.Frozen(g.ID), freeze); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO complaints (id, gig_id, reason, frozen_usdt_micro) VALUES ($1,$2,$3,$4)`,
-			store.NewID("CMP"), g.ID, reason, freeze); err != nil {
+		until := time.Now().Add(s.Cfg.DisputeWindow)
+		if _, err := tx.Exec(ctx, `INSERT INTO complaints (id, gig_id, reason, frozen_usdt_micro, negotiate_until) VALUES ($1,$2,$3,$4,$5)`,
+			store.NewID("CMP"), g.ID, reason, freeze, until); err != nil {
 			return err
 		}
-		return setStatus(ctx, tx, g, StatusDisputed, "client", "gig.complaint_opened",
-			map[string]any{"reason": reason, "frozen_usdt_micro": freeze})
+		if err := store.Enqueue(ctx, tx, JobEscalateDispute, map[string]string{"gig_id": g.ID}, "escalate:"+g.ID, until); err != nil {
+			return err
+		}
+		return setStatus(ctx, tx, g, StatusDisputed, "client", "gig.dispute_opened",
+			map[string]any{"reason": reason, "frozen_usdt_micro": freeze, "negotiate_until": until})
 	})
 	if err != nil {
 		return nil, err
@@ -151,7 +156,7 @@ func (s *Service) AutoRelease(ctx context.Context, gigID string) error {
 		if err != nil {
 			return err
 		}
-		if g.Status != StatusDonePending && g.Status != StatusDisputed {
+		if g.Status != StatusDonePending && g.Status != StatusDisputed && g.Status != StatusEscalated {
 			return nil // already settled or cancelled
 		}
 		if g.ReleaseAt != nil && time.Now().Before(*g.ReleaseAt) {
@@ -164,57 +169,15 @@ func (s *Service) AutoRelease(ctx context.Context, gigID string) error {
 		if _, err := ledger.Move(ctx, tx, "release:"+g.ID, "release", g.ID, ledger.Escrow(g.ID), ledger.Worker(g.WorkerID), escrow); err != nil {
 			return err
 		}
-		if g.Status == StatusDisputed {
+		if g.Status == StatusDisputed || g.Status == StatusEscalated {
+			if escrow == 0 {
+				return nil
+			}
 			return store.Audit(ctx, tx, g.ID, g.WorkerID, "system", "gig.unfrozen_part_released", g.Status, g.Status,
 				map[string]any{"released_usdt_micro": escrow})
 		}
 		return setStatus(ctx, tx, g, StatusReleased, "system", "gig.auto_released", map[string]any{"released_usdt_micro": escrow})
 	})
-}
-
-// ResolveComplaint settles the frozen part: to the worker, or back to the client.
-func (s *Service) ResolveComplaint(ctx context.Context, gigID, outcome string) (*Gig, error) {
-	if outcome != "worker" && outcome != "client" {
-		return nil, badRequest("validation_error", "outcome must be worker or client")
-	}
-	err := store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
-		g, err := getGig(ctx, tx, gigID, true)
-		if err != nil {
-			return err
-		}
-		if g.Status != StatusDisputed {
-			return conflict("invalid_state", "gig has no open complaint")
-		}
-		frozen, err := ledger.Balance(ctx, tx, ledger.Frozen(g.ID))
-		if err != nil {
-			return err
-		}
-		to, final := ledger.Worker(g.WorkerID), StatusReleased
-		if outcome == "client" {
-			to, final = ledger.ExternalRefund, StatusPartiallyRefunded
-		}
-		if _, err := ledger.Move(ctx, tx, "resolve:"+g.ID, "unfreeze", g.ID, ledger.Frozen(g.ID), to, frozen); err != nil {
-			return err
-		}
-		// Whatever is still in escrow (window may not have ended) goes to the worker now.
-		escrow, err := ledger.Balance(ctx, tx, ledger.Escrow(g.ID))
-		if err != nil {
-			return err
-		}
-		if _, err := ledger.Move(ctx, tx, "release:"+g.ID, "release", g.ID, ledger.Escrow(g.ID), ledger.Worker(g.WorkerID), escrow); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE complaints SET status = $2, resolved_at = now() WHERE gig_id = $1 AND status = 'open'`,
-			g.ID, "resolved_"+outcome); err != nil {
-			return err
-		}
-		return setStatus(ctx, tx, g, final, "admin", "gig.complaint_resolved",
-			map[string]any{"outcome": outcome, "frozen_usdt_micro": frozen})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return getGig(ctx, s.DB, gigID, false)
 }
 
 // Cancel by the client. Before payment it just closes. After booking, the
@@ -282,13 +245,7 @@ type AuditRow struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-type Complaint struct {
-	ID        string    `json:"id"`
-	Reason    string    `json:"reason"`
-	Frozen    int64     `json:"frozen_usdt_micro"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-}
+type Complaint = Dispute
 
 func (s *Service) GetGig(ctx context.Context, id string) (*GigDetail, error) {
 	g, err := getGig(ctx, s.DB, id, false)
@@ -311,31 +268,11 @@ func (s *Service) GetGig(ctx context.Context, id string) (*GigDetail, error) {
 	if d.Ledger, err = ledger.EntriesForGig(ctx, s.DB, id); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT actor, action, from_status, to_status, details, created_at FROM audit_log WHERE gig_id = $1 ORDER BY id`, id)
-	if err != nil {
+	if d.Audit, err = s.timeline(ctx, id); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	d.Audit = []AuditRow{}
-	for rows.Next() {
-		var a AuditRow
-		if err := rows.Scan(&a.Actor, &a.Action, &a.From, &a.To, &a.Details, &a.CreatedAt); err != nil {
-			return nil, err
-		}
-		d.Audit = append(d.Audit, a)
-	}
-	crows, err := s.DB.Query(ctx, `SELECT id, reason, frozen_usdt_micro, status, created_at FROM complaints WHERE gig_id = $1 ORDER BY created_at`, id)
-	if err != nil {
+	if d.Complaints, err = s.disputes(ctx, id); err != nil {
 		return nil, err
-	}
-	defer crows.Close()
-	d.Complaints = []Complaint{}
-	for crows.Next() {
-		var c Complaint
-		if err := crows.Scan(&c.ID, &c.Reason, &c.Frozen, &c.Status, &c.CreatedAt); err != nil {
-			return nil, err
-		}
-		d.Complaints = append(d.Complaints, c)
 	}
 	return d, nil
 }

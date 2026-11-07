@@ -19,12 +19,15 @@ import (
 //	BOOKED           -> CANCELLED (remaining escrow refunded; deposit kept on late cancel)
 //	DONE_PENDING     -> RELEASED (complaint window ends, worker job auto-releases)
 //	DONE_PENDING     -> DISPUTED (complaint inside the window freezes part)
-//	DISPUTED         -> RELEASED | PARTIALLY_REFUNDED (complaint resolved)
+//	DISPUTED         -> RELEASED | PARTIALLY_REFUNDED (both sides agree a split)
+//	DISPUTED         -> ESCALATED (no agreement before the dispute window ends)
+//	ESCALATED        -> RELEASED | PARTIALLY_REFUNDED (GigVault decides, takes a resolution fee)
 const (
 	StatusAwaitingPayment   = "AWAITING_PAYMENT"
 	StatusBooked            = "BOOKED"
 	StatusDonePending       = "DONE_PENDING"
 	StatusDisputed          = "DISPUTED"
+	StatusEscalated         = "ESCALATED"
 	StatusReleased          = "RELEASED"
 	StatusPartiallyRefunded = "PARTIALLY_REFUNDED"
 	StatusCancelled         = "CANCELLED"

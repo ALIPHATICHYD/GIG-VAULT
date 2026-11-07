@@ -21,7 +21,10 @@ type Config struct {
 	BushaWebhookSecret string
 
 	// Escrow rules (from our Scenario 3 pitch)
-	DepositBps       int           // share released at booking, basis points (2500 = 25%)
+	DepositBps       int           // default upfront share released at payment, basis points (2000 = 20%)
+	MaxDepositBps    int           // most a creator can ask upfront
+	DisputeWindow    time.Duration // time for both sides to agree a split before GigVault steps in
+	DisputeFeeBps    int           // GigVault's fee when it has to resolve a dispute
 	FreezeBps        int           // share of the remaining escrow a complaint can freeze
 	ComplaintWindow  time.Duration // time after "gig done" before auto-release
 	LateCancelWindow time.Duration // cancelling closer than this to the event is "late"
@@ -43,7 +46,10 @@ func Load() (Config, error) {
 		BushaPublicKey:     os.Getenv("BUSHA_PUBLIC_KEY"),
 		BushaProfileID:     os.Getenv("BUSHA_PROFILE_ID"),
 		BushaWebhookSecret: env("BUSHA_WEBHOOK_SECRET", "dev-webhook-secret"),
-		DepositBps:         envInt("DEPOSIT_BPS", 2500),
+		DepositBps:         envInt("DEPOSIT_BPS", 2000),
+		MaxDepositBps:      envInt("MAX_DEPOSIT_BPS", 7000),
+		DisputeWindow:      envDur("DISPUTE_WINDOW", 72*time.Hour),
+		DisputeFeeBps:      envInt("DISPUTE_FEE_BPS", 1000),
 		FreezeBps:          envInt("FREEZE_BPS", 5000),
 		ComplaintWindow:    envDur("COMPLAINT_WINDOW", 60*time.Second),
 		LateCancelWindow:   envDur("LATE_CANCEL_WINDOW", 24*time.Hour),

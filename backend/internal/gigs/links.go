@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -140,12 +141,15 @@ func (s *Service) ResolveBank(ctx context.Context, bankCode, accountNumber strin
 
 // ---------- creator: gig link ----------
 
+// CreateGigLinkInput is an invoice: what the creator is charging a named client for.
 type CreateGigLinkInput struct {
-	Title      string    `json:"title"`
-	EventAt    time.Time `json:"event_at"`
-	AmountNGN  string    `json:"amount_ngn"`
-	ClientName string    `json:"client_name"` // optional, pre-fills the pay page
-	Note       string    `json:"note"`
+	Title          string    `json:"title"`
+	EventAt        time.Time `json:"event_at"`
+	AmountNGN      string    `json:"amount_ngn"`
+	ClientName     string    `json:"client_name"`
+	ClientEmail    string    `json:"client_email"`    // optional; a client signing up with this email sees it automatically
+	UpfrontPercent *int      `json:"upfront_percent"` // released when the client pays, so work can start (default 20)
+	Note           string    `json:"note"`
 }
 
 type GigLink struct {
@@ -156,11 +160,21 @@ type GigLink struct {
 // CreateGigLink is what the creator does after agreeing a price on WhatsApp.
 // No money moves yet; the client opens the link and pays.
 func (s *Service) CreateGigLink(ctx context.Context, workerID string, in CreateGigLinkInput) (*GigLink, error) {
+	upfront := s.Cfg.DepositBps
+	if in.UpfrontPercent != nil {
+		upfront = *in.UpfrontPercent * 100
+	}
 	switch {
 	case strings.TrimSpace(in.Title) == "":
 		return nil, badRequest("validation_error", "title is required")
+	case strings.TrimSpace(in.ClientName) == "":
+		return nil, badRequest("validation_error", "client_name is required")
+	case in.ClientEmail != "" && !strings.Contains(in.ClientEmail, "@"):
+		return nil, badRequest("validation_error", "client_email is not a valid email")
 	case in.EventAt.IsZero():
 		return nil, badRequest("validation_error", "event_at is required (RFC 3339)")
+	case upfront < 0 || upfront > s.Cfg.MaxDepositBps:
+		return nil, badRequest("validation_error", "upfront_percent must be between 0 and "+strconv.Itoa(s.Cfg.MaxDepositBps/100))
 	}
 	kobo, err := ParseDecimal(in.AmountNGN, 2)
 	if err != nil || kobo < 100_00 {
@@ -171,15 +185,15 @@ func (s *Service) CreateGigLink(ctx context.Context, workerID string, in CreateG
 	}
 	id, token := store.NewID("GIG"), newToken()
 	err = store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO gigs (id, worker_id, title, client_name, note, event_at, amount_ngn_kobo,
+		if _, err := tx.Exec(ctx, `INSERT INTO gigs (id, worker_id, title, client_name, client_email, note, event_at, amount_ngn_kobo,
 			deposit_bps, freeze_bps, complaint_window_seconds, status, payment_reference, client_token)
-			VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''),$6,$7,$8,$9,$10,$11,$1,$12)`,
-			id, workerID, in.Title, in.ClientName, in.Note, in.EventAt, kobo, s.Cfg.DepositBps, s.Cfg.FreezeBps,
+			VALUES ($1,$2,$3,$4,NULLIF(lower($5),''),NULLIF($6,''),$7,$8,$9,$10,$11,$12,$1,$13)`,
+			id, workerID, in.Title, in.ClientName, in.ClientEmail, in.Note, in.EventAt, kobo, upfront, s.Cfg.FreezeBps,
 			int(s.Cfg.ComplaintWindow.Seconds()), StatusAwaitingPayment, token); err != nil {
 			return err
 		}
-		return store.Audit(ctx, tx, id, workerID, "worker", "gig.link_created", "", StatusAwaitingPayment,
-			map[string]any{"amount_ngn_kobo": kobo})
+		return store.Audit(ctx, tx, id, workerID, "creator", "invoice.sent", "", StatusAwaitingPayment,
+			map[string]any{"amount_ngn_kobo": kobo, "client_name": in.ClientName, "upfront_percent": upfront / 100})
 	})
 	if err != nil {
 		return nil, err
@@ -227,7 +241,19 @@ type PublicGig struct {
 		Craft    *string `json:"craft"`
 		Verified bool    `json:"verified"`
 	} `json:"creator"`
-	BushaMode string `json:"busha_mode"`
+	Timeline          []AuditRow `json:"timeline"`
+	Dispute           *Dispute   `json:"dispute"`
+	DisputeFeePercent int        `json:"dispute_fee_percent"`
+	BushaMode         string     `json:"busha_mode"`
+}
+
+// MarkOpened records the first time the client opens the invoice link.
+func (s *Service) MarkOpened(ctx context.Context, gigID string) {
+	var workerID string
+	err := s.DB.QueryRow(ctx, `UPDATE gigs SET opened_at = now() WHERE id = $1 AND opened_at IS NULL RETURNING worker_id`, gigID).Scan(&workerID)
+	if err == nil {
+		_ = store.Audit(ctx, s.DB, gigID, workerID, "client", "invoice.opened", "", "", nil)
+	}
 }
 
 func (s *Service) PublicGig(ctx context.Context, gigID, token string) (*PublicGig, error) {
@@ -250,6 +276,17 @@ func (s *Service) PublicGig(ctx context.Context, gigID, token string) (*PublicGi
 		p.PaymentDetails = g.PaymentDetails
 	}
 	p.Creator.Name, p.Creator.Craft, p.Creator.Verified = w.Name, w.Craft, w.KYCStatus == "verified"
+	p.DisputeFeePercent = s.Cfg.DisputeFeeBps / 100
+	if p.Timeline, err = s.timeline(ctx, gigID); err != nil {
+		return nil, err
+	}
+	ds, err := s.disputes(ctx, gigID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ds) > 0 {
+		p.Dispute = &ds[len(ds)-1]
+	}
 	return p, nil
 }
 
@@ -349,3 +386,22 @@ func def(v, d string) string {
 	}
 	return v
 }
+
+func (s *Service) timeline(ctx context.Context, gigID string) ([]AuditRow, error) {
+	rows, err := s.DB.Query(ctx, `SELECT actor, action, from_status, to_status, details, created_at FROM audit_log WHERE gig_id = $1 ORDER BY id`, gigID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AuditRow{}
+	for rows.Next() {
+		var a AuditRow
+		if err := rows.Scan(&a.Actor, &a.Action, &a.From, &a.To, &a.Details, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+var _ = json.Marshal
