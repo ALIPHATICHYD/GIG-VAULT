@@ -9,8 +9,9 @@ import (
 )
 
 type Config struct {
-	Port        string
-	DatabaseURL string
+	Port               string
+	DatabaseURL        string
+	DatabaseUnpooledURL string
 
 	// Busha
 	BushaMode          string // "live" (sandbox/production API) or "mock" (offline fallback, clearly labelled)
@@ -38,9 +39,10 @@ type Config struct {
 
 func Load() (Config, error) {
 	c := Config{
-		Port:               env("PORT", "8080"),
-		DatabaseURL:        env("DATABASE_URL", "postgres://gigvault:gigvault@localhost:5432/gigvault?sslmode=disable"),
-		BushaMode:          env("BUSHA_MODE", "mock"),
+		Port:                env("PORT", "8080"),
+		DatabaseURL:         env("DATABASE_URL", "postgres://gigvault:gigvault@localhost:5432/gigvault?sslmode=disable"),
+		DatabaseUnpooledURL: os.Getenv("DATABASE_URL_UNPOOLED"),
+		BushaMode:           env("BUSHA_MODE", "mock"),
 		BushaBaseURL:       env("BUSHA_BASE_URL", "https://api.sandbox.busha.so"),
 		BushaSecretKey:     os.Getenv("BUSHA_SECRET_KEY"),
 		BushaPublicKey:     os.Getenv("BUSHA_PUBLIC_KEY"),
@@ -69,6 +71,15 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("DEPOSIT_BPS and FREEZE_BPS must be between 0 and 10000")
 	}
 	return c, nil
+}
+
+// DatabaseMigrationURL returns the direct (unpooled) connection string when
+// available (recommended for Neon schema migrations), falling back to DatabaseURL.
+func (c Config) DatabaseMigrationURL() string {
+	if c.DatabaseUnpooledURL != "" {
+		return c.DatabaseUnpooledURL
+	}
+	return c.DatabaseURL
 }
 
 func env(k, def string) string {

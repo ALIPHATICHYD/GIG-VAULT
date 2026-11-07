@@ -58,6 +58,16 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+// MigrateURL connects to url (typically DATABASE_URL_UNPOOLED on Neon) and runs schema migrations.
+func MigrateURL(ctx context.Context, url string) error {
+	pool, err := Connect(ctx, url)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	return Migrate(ctx, pool)
+}
+
 // InTx runs fn in a transaction and commits only if fn returns nil.
 func InTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	tx, err := pool.Begin(ctx)

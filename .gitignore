@@ -5,3 +5,7 @@ web/dist/
 backend/bin/
 .DS_Store
 *.tsbuildinfo
+.neon
+skills-lock.json
+.agents/
+.claude/skills/

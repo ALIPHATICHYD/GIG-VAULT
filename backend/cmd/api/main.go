@@ -31,6 +31,9 @@ func main() {
 
 func run(log *slog.Logger) error {
 	loadDotEnv(".env")
+	loadDotEnv(".env.local")
+	loadDotEnv("../.env.local")
+	loadDotEnv("../.env")
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -38,14 +41,14 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := store.MigrateURL(ctx, cfg.DatabaseMigrationURL()); err != nil {
+		return err
+	}
 	pool, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := store.Migrate(ctx, pool); err != nil {
-		return err
-	}
 
 	var api busha.API
 	if cfg.BushaMode == "live" {
@@ -131,6 +134,16 @@ func loadDotEnv(path string) {
 				k, v := line[:i], line[i+1:]
 				if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
 					v = v[1 : len(v)-1]
+				} else {
+					for j := 0; j < len(v); j++ {
+						if v[j] == '#' && (j == 0 || v[j-1] == ' ' || v[j-1] == '\t') {
+							v = v[:j]
+							break
+						}
+					}
+					for len(v) > 0 && (v[len(v)-1] == ' ' || v[len(v)-1] == '\t') {
+						v = v[:len(v)-1]
+					}
 				}
 				if _, set := os.LookupEnv(k); !set {
 					os.Setenv(k, v)
