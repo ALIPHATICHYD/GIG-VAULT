@@ -81,7 +81,14 @@ func New(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("parse %s: %v", EnvVar, err)
 	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	// Neon ignores search_path passed as a startup parameter, so it has to be a
+	// SET on each connection as it is established. That is safe here only
+	// because the DSN above is the direct endpoint: the same SET on a pooled
+	// connection would leak to other clients sharing that server connection.
+	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SET search_path TO "+pgx.Identifier{schema}.Sanitize())
+		return err
+	}
 	cfg.MaxConns = 4
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
