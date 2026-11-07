@@ -63,7 +63,28 @@ For a live demo, shorten the timers in `backend/.env`:
 ```
 COMPLAINT_WINDOW=60s
 DISPUTE_WINDOW=2m
+INVOICE_EXPIRY=30s
 ```
+
+### Start the demo from a clean slate
+
+```bash
+make seed                            # or: cd backend && go run ./cmd/seed -reset
+```
+
+This **wipes the database** and rebuilds a known state: the two demo accounts and
+three invoices, one awaiting payment (the one you let a judge pay), one paid and
+counting down to release, one finished and cashed out to the bank. It prints the
+pay link, the wallet totals and the ledger position, so you know the numbers
+before you are asked about them.
+
+It builds that state by calling the real service — checkout, funding, release,
+cash-out — so the timelines and ledger entries are genuine, not fixtures.
+
+`-reset` truncates every table, because `ledger_entries` rejects `DELETE` by
+design and a partial clean-up is impossible. It refuses to run against
+`BUSHA_MODE=live` unless you add `-force`. Use `-countdown 20m` to give the
+releasing invoice more time than the default 10 minutes.
 
 ---
 
@@ -75,7 +96,40 @@ DISPUTE_WINDOW=2m
 | Peter | `backend/internal/gigs/`, `backend/internal/ledger/` | Invoices, escrow rules, disputes, ledger, wallet, cash-out |
 | ALIPHATIC | `web/src/pages/` | `Creator.tsx`, `Client.tsx`, `Auth.tsx` screens; shared UI in `web/src/ui.tsx` |
 
-Run the backend checks with `make test`.
+### Running the tests
+
+```bash
+cd backend && go vet ./... && go test ./...     # or: make test
+```
+
+The ledger and invoice-lifecycle tests need a real Postgres, because what they check is enforced
+by the database: the append-only trigger, the unique idempotency key, transaction rollback. Set
+`TEST_DATABASE_URL` to a throwaway database and they run; leave it unset and they skip, so the
+command above passes either way.
+
+```bash
+TEST_DATABASE_URL='postgresql://...neon.tech/test?sslmode=require' go test ./...
+```
+
+Create a **Neon branch** for it rather than using your dev database. Each test runs in its own
+schema, created and dropped automatically, so nothing else in the database is touched.
+
+Use the **direct** connection string, not the `-pooler` one. Neon's pooled endpoint rejects the
+`search_path` parameter the tests use to isolate themselves (*"unsupported startup parameter …
+please use unpooled connection"*), so the harness strips `-pooler` for you and stops with a clear
+error if a connection still slips through. Worth knowing why: a `SET search_path` that lands on a
+pooled connection leaks to whichever client is handed that shared server connection next, which
+shows up as unrelated queries failing with `relation "gigs" does not exist`.
+
+**These tests are slow against Neon** — roughly 5–25s each, and 10+ minutes for the suite, because
+every assertion is an internet round trip and each test migrates its own schema. Hence the
+`-timeout 40m` in `make test`; Go's default is 10 minutes and the suite will be killed partway
+without it. A local Postgres is dramatically faster if you run them often:
+
+```bash
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=gigvault -e POSTGRES_DB=gigvault postgres:16
+TEST_DATABASE_URL='postgres://postgres:gigvault@localhost:5432/gigvault?sslmode=disable' go test ./...
+```
 
 ---
 
@@ -117,11 +171,12 @@ Responses look like Busha's: `{"status": "success"|"error", "message": "...", "d
 
 | Who | Method and path | What it does |
 |---|---|---|
-| anyone | `POST /v1/auth/signup`, `POST /v1/auth/login` | `role`: `creator` or `client` |
+| anyone | `POST /v1/auth/signup`, `POST /v1/auth/login` | `role`: `creator` or `client`. Login allows 5 tries a minute per email and per IP, then 429 `too_many_attempts` |
 | creator | `POST /v1/creator/onboard` | Bank, BVN/NIN, Busha recipient + KYC link |
 | creator | `GET /v1/creator/wallet` | Withdrawable, locked, frozen (in naira) |
 | creator | `POST /v1/creator/gigs` | Send an invoice: `client_name`, `client_email`, `amount_ngn`, `upfront_percent`, `title`, `event_at` |
 | creator | `GET /v1/creator/gigs/{id}` | Client, timeline, ledger |
+| creator | `POST /v1/creator/gigs/{id}/void` | Withdraw an unpaid invoice so it can't be paid |
 | creator | `POST /v1/creator/gigs/{id}/dispute/propose` · `/accept` | Agree a split |
 | creator | `POST /v1/creator/cashout` | `{"amount_ngn": "50000"}` |
 | anyone with link | `GET /v1/pay/{id}?t=` | Invoice preview |
@@ -130,6 +185,7 @@ Responses look like Busha's: `{"status": "success"|"error", "message": "...", "d
 | client | `POST /v1/client/bookings/{id}/checkout` | Pay: `{"currency": "NGN"}` or `"USDT"` |
 | client | `POST /v1/client/bookings/{id}/complete` · `/complaints` · `/cancel` | Done, dispute, cancel |
 | client | `POST /v1/client/bookings/{id}/dispute/propose` · `/accept` | Agree a split |
+| admin (`X-Admin-Key`) | `GET /v1/admin/disputes` | The arbitration queue: escalated disputes, both sides' last offer |
 | admin (`X-Admin-Key`) | `POST /v1/admin/gigs/{id}/dispute/resolve` | After 3 days: `{"creator_percent": 50}`, 10% fee |
 | admin | `GET /v1/admin/reconciliation` | Ledger vs Busha |
 | Busha | `POST /v1/webhooks/busha` | Signed webhooks |

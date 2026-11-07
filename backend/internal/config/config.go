@@ -29,12 +29,17 @@ type Config struct {
 	FreezeBps        int           // share of the remaining escrow a complaint can freeze
 	ComplaintWindow  time.Duration // time after "gig done" before auto-release
 	LateCancelWindow time.Duration // cancelling closer than this to the event is "late"
+	InvoiceExpiry    time.Duration // an unpaid invoice expires this long after it is sent
 	MockRateNGN      int64         // NGN per 1 USDT used only in mock mode
 
 	AllowDevRoutes bool
 	CORSOrigin     string
 	AuthSecret     string
 	AdminKey       string
+
+	// Login throttling, per email and per IP. A zero limit disables it.
+	LoginRateLimit  int
+	LoginRateWindow time.Duration
 }
 
 func Load() (Config, error) {
@@ -55,11 +60,14 @@ func Load() (Config, error) {
 		FreezeBps:          envInt("FREEZE_BPS", 5000),
 		ComplaintWindow:    envDur("COMPLAINT_WINDOW", 60*time.Second),
 		LateCancelWindow:   envDur("LATE_CANCEL_WINDOW", 24*time.Hour),
+		InvoiceExpiry:      envDur("INVOICE_EXPIRY", 168*time.Hour),
 		MockRateNGN:        int64(envInt("MOCK_RATE_NGN", 1600)),
 		AllowDevRoutes:     env("ALLOW_DEV_ROUTES", "true") == "true",
 		CORSOrigin:         env("CORS_ORIGIN", "http://localhost:5173"),
 		AuthSecret:         env("AUTH_SECRET", "dev-auth-secret-change-me"),
 		AdminKey:           env("ADMIN_KEY", "dev-admin"),
+		LoginRateLimit:     envInt("LOGIN_RATE_LIMIT", 5),
+		LoginRateWindow:    envDur("LOGIN_RATE_WINDOW", time.Minute),
 	}
 	if c.BushaMode != "mock" && c.BushaMode != "live" {
 		return c, fmt.Errorf("BUSHA_MODE must be mock or live, got %q", c.BushaMode)

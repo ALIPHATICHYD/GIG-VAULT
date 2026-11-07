@@ -30,10 +30,11 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	loadDotEnv(".env")
-	loadDotEnv(".env.local")
-	loadDotEnv("../.env.local")
-	loadDotEnv("../.env")
+	// .env.local wins over .env; real env vars win over both.
+	config.LoadDotEnv(".env.local")
+	config.LoadDotEnv(".env")
+	config.LoadDotEnv("../.env.local")
+	config.LoadDotEnv("../.env")
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -83,6 +84,15 @@ func run(log *slog.Logger) error {
 			}
 			return svc.AutoRelease(ctx, in.GigID)
 		},
+		gigs.JobExpireInvoice: func(ctx context.Context, p json.RawMessage) error {
+			var in struct {
+				GigID string `json:"gig_id"`
+			}
+			if err := json.Unmarshal(p, &in); err != nil {
+				return err
+			}
+			return svc.ExpireInvoice(ctx, in.GigID)
+		},
 		gigs.JobEscalateDispute: func(ctx context.Context, p json.RawMessage) error {
 			var in struct {
 				GigID string `json:"gig_id"`
@@ -117,58 +127,4 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	return nil
-}
-
-// loadDotEnv reads KEY=VALUE lines without overriding real env vars.
-func loadDotEnv(path string) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	for _, line := range splitLines(string(b)) {
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		for i := 0; i < len(line); i++ {
-			if line[i] == '=' {
-				k, v := line[:i], line[i+1:]
-				if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
-					v = v[1 : len(v)-1]
-				} else {
-					for j := 0; j < len(v); j++ {
-						if v[j] == '#' && (j == 0 || v[j-1] == ' ' || v[j-1] == '\t') {
-							v = v[:j]
-							break
-						}
-					}
-					for len(v) > 0 && (v[len(v)-1] == ' ' || v[len(v)-1] == '\t') {
-						v = v[:len(v)-1]
-					}
-				}
-				if _, set := os.LookupEnv(k); !set {
-					os.Setenv(k, v)
-				}
-				break
-			}
-		}
-	}
-}
-
-func splitLines(s string) []string {
-	out := []string{}
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			line := s[start:i]
-			if len(line) > 0 && line[len(line)-1] == '\r' {
-				line = line[:len(line)-1]
-			}
-			out = append(out, line)
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
 }

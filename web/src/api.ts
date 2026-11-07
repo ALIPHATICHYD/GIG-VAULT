@@ -4,7 +4,7 @@ const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 export type Role = "creator" | "client";
 export type GigStatus =
   | "AWAITING_PAYMENT" | "BOOKED" | "DONE_PENDING" | "DISPUTED" | "ESCALATED"
-  | "RELEASED" | "PARTIALLY_REFUNDED" | "CANCELLED";
+  | "RELEASED" | "PARTIALLY_REFUNDED" | "CANCELLED" | "VOIDED" | "EXPIRED";
 
 export interface User { id: string; email: string; name: string; phone: string | null; role: Role; worker_id: string | null }
 
@@ -144,6 +144,7 @@ export const api = {
     post<{ gig: Gig; pay_path: string }>("/v1/creator/gigs", d),
   activity: () => call<(TimelineEvent & { gig_id: string | null; gig_title: string | null })[]>("/v1/creator/activity"),
   creatorGig: (id: string) => call<GigDetail>(`/v1/creator/gigs/${id}`),
+  voidInvoice: (id: string) => post<GigDetail>(`/v1/creator/gigs/${id}/void`),
   cashout: (amount_ngn: string) => post("/v1/creator/cashout", { amount_ngn }),
   creatorPropose: (id: string, creator_percent: number) => post(`/v1/creator/gigs/${id}/dispute/propose`, { creator_percent }),
   creatorAccept: (id: string) => post(`/v1/creator/gigs/${id}/dispute/accept`),

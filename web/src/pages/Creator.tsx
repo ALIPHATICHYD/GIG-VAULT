@@ -426,6 +426,7 @@ export function CreatorGig({ id }: { id: string }) {
   const d = p.data;
   const { busy, err, run } = useAction();
   const [copied, setCopied] = useState(false);
+  const [confirmVoid, setConfirmVoid] = useState(false);
   const dispute = d?.complaints.length ? d.complaints[d.complaints.length - 1] : null;
   const link = d?.pay_path ? window.location.origin + d.pay_path : "";
   const upfront = d ? d.gig.deposit_bps / 100 : 0;
@@ -460,6 +461,19 @@ export function CreatorGig({ id }: { id: string }) {
               <Btn small full={false} variant="soft" icon={copied ? "check" : "copy"} onClick={() => { navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? "Copied" : "Copy"}</Btn>
             </div>
           )}
+          {d.gig.status === "AWAITING_PAYMENT" && (confirmVoid ? (
+            <Card>
+              <div className="text-sm">Withdraw this invoice? {d.gig.client_name ?? "The client"} won't be able to pay it, and this can't be undone.</div>
+              <div className="mt-3 flex gap-2">
+                <Btn variant="secondary" disabled={busy} onClick={() => setConfirmVoid(false)}>Keep it</Btn>
+                <Btn variant="danger" disabled={busy} onClick={() => run(async () => { await api.voidInvoice(id); setConfirmVoid(false); p.refresh(); })}>Yes, void it</Btn>
+              </div>
+            </Card>
+          ) : (
+            <button className="self-center text-sm font-bold text-red" onClick={() => setConfirmVoid(true)}>Void this invoice</button>
+          ))}
+          {d.gig.status === "VOIDED" && <Note tone="soft" icon="x">You withdrew this invoice, so it can no longer be paid.</Note>}
+          {d.gig.status === "EXPIRED" && <Note tone="soft" icon="clock">This invoice expired before it was paid. Send {d.gig.client_name ?? "your client"} a new one.</Note>}
           {d.gig.status === "DONE_PENDING" && (
             <Hero strip={[110, 140]}>
               <div className="text-xl font-extrabold">Client confirmed. Paying out to you in</div>
