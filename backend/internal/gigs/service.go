@@ -486,9 +486,18 @@ func kobo(g *Gig, micro int64) int64 {
 
 // Activity is the creator's own feed: every invoice event plus cash-outs.
 func (s *Service) Activity(ctx context.Context, workerID string) ([]ActivityRow, error) {
-	rows, err := s.DB.Query(ctx, `SELECT a.gig_id, g.title, a.actor, a.action, a.to_status, a.details, a.created_at
-		FROM audit_log a LEFT JOIN gigs g ON g.id = a.gig_id
-		WHERE a.worker_id = $1 ORDER BY a.id DESC LIMIT 60`, workerID)
+	return s.activity(ctx, `WHERE a.worker_id = $1`, workerID)
+}
+
+// ClientActivity is the client's feed: every event on invoices addressed to them.
+// The id lets the app tell which notifications are new.
+func (s *Service) ClientActivity(ctx context.Context, userID string) ([]ActivityRow, error) {
+	return s.activity(ctx, `WHERE g.client_user_id = $1`, userID)
+}
+
+func (s *Service) activity(ctx context.Context, where, arg string) ([]ActivityRow, error) {
+	rows, err := s.DB.Query(ctx, `SELECT a.id, a.gig_id, g.title, a.actor, a.action, a.to_status, a.details, a.created_at
+		FROM audit_log a LEFT JOIN gigs g ON g.id = a.gig_id `+where+` ORDER BY a.id DESC LIMIT 60`, arg)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +505,7 @@ func (s *Service) Activity(ctx context.Context, workerID string) ([]ActivityRow,
 	out := []ActivityRow{}
 	for rows.Next() {
 		var r ActivityRow
-		if err := rows.Scan(&r.GigID, &r.GigTitle, &r.Actor, &r.Action, &r.To, &r.Details, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.GigID, &r.GigTitle, &r.Actor, &r.Action, &r.To, &r.Details, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -505,6 +514,7 @@ func (s *Service) Activity(ctx context.Context, workerID string) ([]ActivityRow,
 }
 
 type ActivityRow struct {
+	ID       int64   `json:"id"`
 	GigID    *string `json:"gig_id"`
 	GigTitle *string `json:"gig_title"`
 	AuditRow

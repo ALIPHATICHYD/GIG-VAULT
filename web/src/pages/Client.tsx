@@ -1,3 +1,4 @@
+import { Bell, Notifications } from "../notify";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import qrcode from "qrcode-generator";
 import { api, ApiError, fmtDate, naira, session, usdt, type PublicGig } from "../api";
@@ -116,6 +117,7 @@ export function Bookings({ tab = "pending" }: { tab?: "pending" | "history" }) {
       <div className="flex items-center gap-3">
         <Avatar name={user?.name ?? ""} lime={false} />
         <div className="flex-1"><div className="text-[13px] text-mu">Welcome back</div><div className="text-lg font-extrabold">{first(user?.name)}</div></div>
+        <Bell />
         <ThemeToggle />
       </div>
       {b.error && <ErrorNote msg={b.error} />}
@@ -462,4 +464,8 @@ export function CancelBooking({ id }: { id: string }) {
       <ErrorNote msg={err} />
     </Screen>
   );
+}
+
+export function ClientNotifications() {
+  return <Notifications nav={NAV} />;
 }
