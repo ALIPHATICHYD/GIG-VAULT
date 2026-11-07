@@ -23,6 +23,19 @@ func LoadDotEnv(path string) {
 				k, v := line[:i], line[i+1:]
 				if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
 					v = v[1 : len(v)-1]
+				} else {
+					// Strip a trailing comment, but only when the # follows
+					// whitespace, so values containing # survive. .env.example
+					// documents settings this way: "DEPOSIT_BPS=2000  # 20%".
+					for j := 0; j < len(v); j++ {
+						if v[j] == '#' && (j == 0 || v[j-1] == ' ' || v[j-1] == '\t') {
+							v = v[:j]
+							break
+						}
+					}
+					for len(v) > 0 && (v[len(v)-1] == ' ' || v[len(v)-1] == '\t') {
+						v = v[:len(v)-1]
+					}
 				}
 				if _, set := os.LookupEnv(k); !set {
 					os.Setenv(k, v)

@@ -30,7 +30,10 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	config.LoadDotEnv(".env")
+	// Earlier files win, since LoadDotEnv never overwrites what is already set.
+	for _, f := range []string{".env", ".env.local", "../.env.local", "../.env"} {
+		config.LoadDotEnv(f)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -38,14 +41,14 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := store.MigrateURL(ctx, cfg.DatabaseMigrationURL()); err != nil {
+		return err
+	}
 	pool, err := store.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := store.Migrate(ctx, pool); err != nil {
-		return err
-	}
 
 	var api busha.API
 	if cfg.BushaMode == "live" {

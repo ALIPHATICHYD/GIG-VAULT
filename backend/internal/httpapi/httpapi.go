@@ -91,6 +91,7 @@ func (a *API) Router() http.Handler {
 			r.Get("/admin/disputes", a.adminDisputes)
 			r.Post("/admin/gigs/{id}/dispute/resolve", a.resolve)
 			r.Get("/admin/reconciliation", a.reconcile)
+			r.Get("/admin/events", a.events)
 		})
 
 		r.Post("/webhooks/busha", a.bushaWebhook)
@@ -356,6 +357,11 @@ func (a *API) resolveBank(w http.ResponseWriter, r *http.Request) {
 func (a *API) reconcile(w http.ResponseWriter, r *http.Request) {
 	out, err := a.Svc.Reconcile(r.Context())
 	a.respond(w, r, http.StatusOK, "reconciliation", out, err)
+}
+
+func (a *API) events(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.RecentEvents(r.Context(), 20)
+	a.respond(w, r, http.StatusOK, "busha events", out, err)
 }
 
 func (a *API) requireAdmin(next http.Handler) http.Handler {

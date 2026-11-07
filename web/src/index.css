@@ -1,9 +1,71 @@
 @import "tailwindcss";
 
-@theme {
-  --color-vault-900: #0f2e24;
-  --color-vault-700: #145a43;
-  --color-vault-500: #1f8a63;
-  --color-vault-100: #e3f4ec;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+/* GigVault dither theme. Cash is solid, digital money is pixels. */
+:root {
+  --bg: #EDF1ED; --card: #FFFFFF; --inner: #F3F5F3; --text: #10201B; --mu: #5B6B65;
+  --circ: #E4E9E5; --line: #DDE3E0; --pbg: #0B3B2E; --pfg: #FFFFFF; --acc: #0A6B52;
+  --hero: #0B3B2E; --hero-line: transparent; --soft: #EEF8F4; --strip-op: 0.5;
+  --amb-bg: #FFF1DC; --amb: #8A4B00; --red-bg: #FDECEC; --red: #B42318;
+  --nav-shadow: 0 10px 30px rgba(11, 59, 46, 0.14);
+  color-scheme: light;
 }
+[data-theme="dark"] {
+  --bg: #0E1110; --card: #1A1E1C; --inner: #232826; --text: #FFFFFF; --mu: #9AA7A2;
+  --circ: #2A302D; --line: #2A302D; --pbg: #D8FA7A; --pfg: #0B3B2E; --acc: #D8FA7A;
+  --hero: #1A1E1C; --hero-line: #2A302D; --soft: rgba(216, 250, 122, 0.10); --strip-op: 0.35;
+  --amb-bg: rgba(251, 191, 36, 0.15); --amb: #FBBF24; --red-bg: rgba(248, 113, 113, 0.15); --red: #F87171;
+  --nav-shadow: none;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-inner: var(--inner);
+  --color-ink: var(--text);
+  --color-mu: var(--mu);
+  --color-circ: var(--circ);
+  --color-line: var(--line);
+  --color-pbg: var(--pbg);
+  --color-pfg: var(--pfg);
+  --color-acc: var(--acc);
+  --color-hero: var(--hero);
+  --color-soft: var(--soft);
+  --color-amb-bg: var(--amb-bg);
+  --color-amb: var(--amb);
+  --color-red-bg: var(--red-bg);
+  --color-red: var(--red);
+}
+@theme {
+  --color-lime: #D8FA7A;
+  --color-dg: #0B3B2E;
+  --color-em: #0A6B52;
+  --color-mint: #EEF8F4;
+  --color-sage: #B7CFC6;
+  --color-peri: #5B5BE6;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html, body { background: var(--bg); color: var(--text); }
+body { margin: 0; font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+@keyframes gvNote { 0% { transform: translateX(16px); opacity: 0 } 18% { opacity: 1 } 30%, 100% { transform: translateX(0); opacity: 1 } }
+@keyframes gvDraw { 0% { stroke-dashoffset: 74 } 30%, 100% { stroke-dashoffset: 0 } }
+@keyframes gvPulseLime { 0% { box-shadow: 0 0 0 0 rgba(216, 250, 122, .55) } 100% { box-shadow: 0 0 0 14px rgba(216, 250, 122, 0) } }
+@keyframes gvUp { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+@keyframes gvTick { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+@keyframes gvFill { from { width: 0 } }
+@keyframes gvResolve { 0% { opacity: .25 } 20% { opacity: .55 } 40%, 100% { opacity: 1 } }
+@keyframes gvTilt { from { transform: rotate(-4deg) } to { transform: rotate(4deg) } }
+@keyframes gvFloat { 0%, 100% { transform: rotate(-10deg) skewX(-6deg) translateY(0) } 50% { transform: rotate(-10deg) skewX(-6deg) translateY(-6px) } }
+.gv-up { animation: gvUp .5s ease-out both; }
+.gv-tick { animation: gvTick 1s steps(2) infinite; }
+.gv-pulse { animation: gvPulseLime 1.6s ease-out infinite; }
+.gv-fill { animation: gvFill 1.1s ease-out both; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+:root { --logo-tile: #0B3B2E; --tilt-shadow: #064634; }
+[data-theme="dark"] { --logo-tile: #0A6B52; --tilt-shadow: #7FA83A; }

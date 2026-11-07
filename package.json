@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "build": "cd web && npm install && npm run build && cd ../backend && go build ./...",
+    "dev:api": "cd backend && go run ./cmd/api",
+    "dev:web": "cd web && npm run dev"
+  },
+  "dependencies": {
+    "@neon/config": "^1.13.0",
+    "@neon/env": "^2.1.0"
+  }
+}
