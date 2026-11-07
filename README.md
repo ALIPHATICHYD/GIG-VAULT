@@ -63,7 +63,28 @@ For a live demo, shorten the timers in `backend/.env`:
 ```
 COMPLAINT_WINDOW=60s
 DISPUTE_WINDOW=2m
+INVOICE_EXPIRY=30s
 ```
+
+### Start the demo from a clean slate
+
+```bash
+make seed                            # or: cd backend && go run ./cmd/seed -reset
+```
+
+This **wipes the database** and rebuilds a known state: the two demo accounts and
+three invoices, one awaiting payment (the one you let a judge pay), one paid and
+counting down to release, one finished and cashed out to the bank. It prints the
+pay link, the wallet totals and the ledger position, so you know the numbers
+before you are asked about them.
+
+It builds that state by calling the real service — checkout, funding, release,
+cash-out — so the timelines and ledger entries are genuine, not fixtures.
+
+`-reset` truncates every table, because `ledger_entries` rejects `DELETE` by
+design and a partial clean-up is impossible. It refuses to run against
+`BUSHA_MODE=live` unless you add `-force`. Use `-countdown 20m` to give the
+releasing invoice more time than the default 10 minutes.
 
 ---
 
@@ -93,9 +114,22 @@ TEST_DATABASE_URL='postgresql://...neon.tech/test?sslmode=require' go test ./...
 Create a **Neon branch** for it rather than using your dev database. Each test runs in its own
 schema, created and dropped automatically, so nothing else in the database is touched.
 
-Use the **direct** connection string, not the `-pooler` one: Neon's pooled endpoint silently
-discards the `search_path` parameter the tests use to isolate themselves, and the harness will
-stop with an error telling you so. (It strips `-pooler` for you, but the direct host is clearer.)
+Use the **direct** connection string, not the `-pooler` one. Neon's pooled endpoint rejects the
+`search_path` parameter the tests use to isolate themselves (*"unsupported startup parameter …
+please use unpooled connection"*), so the harness strips `-pooler` for you and stops with a clear
+error if a connection still slips through. Worth knowing why: a `SET search_path` that lands on a
+pooled connection leaks to whichever client is handed that shared server connection next, which
+shows up as unrelated queries failing with `relation "gigs" does not exist`.
+
+**These tests are slow against Neon** — roughly 5–25s each, and 10+ minutes for the suite, because
+every assertion is an internet round trip and each test migrates its own schema. Hence the
+`-timeout 40m` in `make test`; Go's default is 10 minutes and the suite will be killed partway
+without it. A local Postgres is dramatically faster if you run them often:
+
+```bash
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=gigvault -e POSTGRES_DB=gigvault postgres:16
+TEST_DATABASE_URL='postgres://postgres:gigvault@localhost:5432/gigvault?sslmode=disable' go test ./...
+```
 
 ---
 

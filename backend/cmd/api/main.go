@@ -30,7 +30,7 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
-	loadDotEnv(".env")
+	config.LoadDotEnv(".env")
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -123,48 +123,4 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	return nil
-}
-
-// loadDotEnv reads KEY=VALUE lines without overriding real env vars.
-func loadDotEnv(path string) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	for _, line := range splitLines(string(b)) {
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		for i := 0; i < len(line); i++ {
-			if line[i] == '=' {
-				k, v := line[:i], line[i+1:]
-				if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
-					v = v[1 : len(v)-1]
-				}
-				if _, set := os.LookupEnv(k); !set {
-					os.Setenv(k, v)
-				}
-				break
-			}
-		}
-	}
-}
-
-func splitLines(s string) []string {
-	out := []string{}
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			line := s[start:i]
-			if len(line) > 0 && line[len(line)-1] == '\r' {
-				line = line[:len(line)-1]
-			}
-			out = append(out, line)
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
 }
