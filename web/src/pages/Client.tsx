@@ -173,6 +173,11 @@ export function Booking({ id }: { id: string }) {
           {gig.status === "PARTIALLY_REFUNDED" && <p className="rounded-xl bg-stone-100 p-4 text-sm">The dispute is settled. Your share has been refunded.</p>}
           {gig.status === "RELEASED" && <p className="rounded-xl bg-vault-100 p-4 text-sm text-vault-900">All done. {gig.creator.name.split(" ")[0]} has been paid. Thanks for booking safely.</p>}
           {gig.status === "CANCELLED" && <p className="rounded-xl bg-stone-100 p-4 text-sm">This booking was cancelled.</p>}
+          {gig.status === "VOIDED" && (
+            <p className="rounded-xl bg-stone-100 p-4 text-sm">
+              {gig.creator.name.split(" ")[0]} withdrew this invoice, so it can no longer be paid. Ask her to send a new one if you still need it.
+            </p>
+          )}
           <ErrorNote msg={err} />
           <Timeline events={gig.timeline} amountKobo={gig.amount_ngn_kobo} tone="client" />
         </>

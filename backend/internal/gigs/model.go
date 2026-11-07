@@ -15,6 +15,7 @@ import (
 //
 //	AWAITING_PAYMENT -> BOOKED (payment confirmed by Busha webhook; deposit released)
 //	AWAITING_PAYMENT -> CANCELLED
+//	AWAITING_PAYMENT -> VOIDED (creator retires an invoice the client never paid)
 //	BOOKED           -> DONE_PENDING (client or organiser confirms the gig is done)
 //	BOOKED           -> CANCELLED (remaining escrow refunded; deposit kept on late cancel)
 //	DONE_PENDING     -> RELEASED (complaint window ends, worker job auto-releases)
@@ -31,6 +32,7 @@ const (
 	StatusReleased          = "RELEASED"
 	StatusPartiallyRefunded = "PARTIALLY_REFUNDED"
 	StatusCancelled         = "CANCELLED"
+	StatusVoided            = "VOIDED"
 )
 
 type Gig struct {

@@ -47,6 +47,7 @@ const STATUS: Record<GigStatus, { label: string; cls: string }> = {
   RELEASED: { label: "Paid ✓", cls: "bg-vault-500 text-white" },
   PARTIALLY_REFUNDED: { label: "Settled", cls: "bg-stone-300 text-stone-800" },
   CANCELLED: { label: "Cancelled", cls: "bg-stone-200 text-stone-500" },
+  VOIDED: { label: "Voided", cls: "bg-stone-200 text-stone-500" },
 };
 
 export function StatusChip({ status }: { status: GigStatus }) {

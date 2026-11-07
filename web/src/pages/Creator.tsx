@@ -237,6 +237,7 @@ export function CreatorGig({ id }: { id: string }) {
   const p = usePoll(() => api.creatorGig(id), 2000, [id]);
   const d = p.data;
   const { busy, err, run } = useAction();
+  const [confirmVoid, setConfirmVoid] = useState(false);
   const dispute = d?.complaints.length ? d.complaints[d.complaints.length - 1] : null;
   return (
     <Shell title={d?.gig.title ?? "Invoice"} subtitle={d ? `${naira(d.gig.amount_ngn_kobo)} · ${d.gig.deposit_bps / 100}% upfront · ${fmtDate(d.gig.event_at)}` : undefined}
@@ -252,7 +253,26 @@ export function CreatorGig({ id }: { id: string }) {
             <StatusChip status={d.gig.status} />
           </div>
           {d.gig.status === "AWAITING_PAYMENT" && d.pay_path && (
-            <p className="break-all rounded-lg bg-stone-100 p-3 font-mono text-xs">{window.location.origin + d.pay_path}</p>
+            <>
+              <p className="break-all rounded-lg bg-stone-100 p-3 font-mono text-xs">{window.location.origin + d.pay_path}</p>
+              {confirmVoid ? (
+                <>
+                  <p className="rounded-xl bg-stone-100 p-3 text-sm">
+                    Withdraw this invoice? {d.gig.client_name ?? "The client"} will no longer be able to pay it, and this can't be undone.
+                  </p>
+                  <Button variant="ghost" disabled={busy}
+                    onClick={() => run(async () => { await api.voidInvoice(id); setConfirmVoid(false); p.refresh(); })}>
+                    Yes, void it
+                  </Button>
+                  <Button variant="ghost" disabled={busy} onClick={() => setConfirmVoid(false)}>Keep it</Button>
+                </>
+              ) : (
+                <Button variant="ghost" disabled={busy} onClick={() => setConfirmVoid(true)}>Void this invoice</Button>
+              )}
+            </>
+          )}
+          {d.gig.status === "VOIDED" && (
+            <p className="rounded-xl bg-stone-100 p-4 text-sm">You withdrew this invoice, so it can no longer be paid.</p>
           )}
           {d.gig.status === "DONE_PENDING" && <Countdown until={d.gig.release_at} label="Paying out to you in" />}
           {dispute && (d.gig.status === "DISPUTED" || d.gig.status === "ESCALATED") && (

@@ -236,6 +236,39 @@ func (s *Service) Cancel(ctx context.Context, gigID string) (*Gig, error) {
 	return getGig(ctx, s.DB, gigID, false)
 }
 
+// VoidInvoice lets the creator retire an invoice the client never paid — a
+// wrong amount, a job that fell through, a duplicate sent twice on WhatsApp.
+//
+// This is deliberately not Cancel: that is the client's action and carries
+// refund rules, whereas here no money has moved, so there is nothing to refund.
+// Checkout already refuses any invoice that is not AWAITING_PAYMENT, so the pay
+// link stops working the moment the status changes.
+func (s *Service) VoidInvoice(ctx context.Context, userID, gigID string) (*GigDetail, error) {
+	wid, err := s.WorkerFor(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	err = store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
+		// Lock the row first, so the check and the write can't race a payment
+		// webhook arriving at the same moment.
+		g, err := getGig(ctx, tx, gigID, true)
+		if err != nil {
+			return err
+		}
+		if g.WorkerID != wid {
+			return notFound("gig") // someone else's invoice: give nothing away
+		}
+		if g.Status != StatusAwaitingPayment {
+			return conflict("invalid_state", "only an unpaid invoice can be voided (this one is "+g.Status+")")
+		}
+		return setStatus(ctx, tx, g, StatusVoided, "creator", "invoice.voided", nil)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetGig(ctx, gigID)
+}
+
 // ---------- reads ----------
 
 type GigDetail struct {

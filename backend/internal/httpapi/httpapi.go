@@ -55,6 +55,7 @@ func (a *API) Router() http.Handler {
 			r.Get("/creator/activity", a.creatorActivity)
 			r.Post("/creator/gigs", a.createGigLink)
 			r.Get("/creator/gigs/{id}", a.creatorGig)
+			r.Post("/creator/gigs/{id}/void", a.voidInvoice)
 			r.Post("/creator/cashout", a.creatorCashout)
 			r.Post("/creator/gigs/{id}/dispute/propose", a.creatorDispute("propose"))
 			r.Post("/creator/gigs/{id}/dispute/accept", a.creatorDispute("accept"))
@@ -181,6 +182,11 @@ func (a *API) createGigLink(w http.ResponseWriter, r *http.Request) {
 func (a *API) creatorGig(w http.ResponseWriter, r *http.Request) {
 	out, err := a.Svc.CreatorGig(r.Context(), sess(r).UserID, chi.URLParam(r, "id"))
 	a.respond(w, r, http.StatusOK, "gig retrieved", out, err)
+}
+
+func (a *API) voidInvoice(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.VoidInvoice(r.Context(), sess(r).UserID, chi.URLParam(r, "id"))
+	a.respond(w, r, http.StatusOK, "invoice voided", out, err)
 }
 
 func (a *API) creatorCashout(w http.ResponseWriter, r *http.Request) {

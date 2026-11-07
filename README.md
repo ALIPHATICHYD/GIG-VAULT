@@ -142,6 +142,7 @@ Responses look like Busha's: `{"status": "success"|"error", "message": "...", "d
 | creator | `GET /v1/creator/wallet` | Withdrawable, locked, frozen (in naira) |
 | creator | `POST /v1/creator/gigs` | Send an invoice: `client_name`, `client_email`, `amount_ngn`, `upfront_percent`, `title`, `event_at` |
 | creator | `GET /v1/creator/gigs/{id}` | Client, timeline, ledger |
+| creator | `POST /v1/creator/gigs/{id}/void` | Withdraw an unpaid invoice so it can't be paid |
 | creator | `POST /v1/creator/gigs/{id}/dispute/propose` · `/accept` | Agree a split |
 | creator | `POST /v1/creator/cashout` | `{"amount_ngn": "50000"}` |
 | anyone with link | `GET /v1/pay/{id}?t=` | Invoice preview |
