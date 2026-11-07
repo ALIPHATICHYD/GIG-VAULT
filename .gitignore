@@ -1,0 +1,7 @@
+.env
+*.env.local
+node_modules/
+web/dist/
+backend/bin/
+.DS_Store
+*.tsbuildinfo
