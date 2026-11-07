@@ -38,8 +38,8 @@ import (
 const (
 	demoWorkerID = "WRK_chidinma"
 	demoClientID = "USR_demo_client"
-	clientName   = "Tolu Adeyemi"
-	clientEmail  = "tolu@demo.gigvault"
+	clientName   = "Aminat Bello"
+	clientEmail  = "aminat@demo.gigvault"
 )
 
 // Every table, for -reset. ledger_entries has an append-only trigger that
@@ -107,16 +107,16 @@ func run(reset, force bool, countdown time.Duration) error {
 	if err := svc.EnsureDemoWorker(ctx); err != nil {
 		return fmt.Errorf("create demo accounts: %w", err)
 	}
-	fmt.Println("accounts:  chidinma@demo.gigvault (creator) · tolu@demo.gigvault (client) · password demo1234")
+	fmt.Println("accounts:  abdullah@demo.gigvault (creator) · aminat@demo.gigvault (client) · password demo1234")
 
 	s := &seeder{svc: svc, pool: pool, ctx: ctx, cfg: cfg}
 
 	// 1. Awaiting payment: what the client pays during the demo.
-	pending, err := s.invoice("Wedding reception — live band set", "120000", 30, 10*24*time.Hour)
+	pending, err := s.invoice("Wedding photography — full day", "120000", 30, 10*24*time.Hour)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  %s  %-34s ₦120,000  30%% upfront  AWAITING_PAYMENT\n", pending.ID, "Wedding reception")
+	fmt.Printf("  %s  %-34s ₦120,000  30%% upfront  AWAITING_PAYMENT\n", pending.ID, "Wedding photography")
 	fmt.Printf("             pay link: /pay/%s?t=%s\n", pending.ID, pending.ClientToken)
 
 	// 2. Paid and counting down to release, so the demo has a live timer.
@@ -137,7 +137,7 @@ func run(reset, force bool, countdown time.Duration) error {
 		releasing.ID, "Instagram campaign", countdown)
 
 	// 3. Finished and cashed out to the bank.
-	done, err := s.invoice("Bridal nails — party of 6", "45000", 20, -7*24*time.Hour)
+	done, err := s.invoice("Birthday portraits — family of 6", "45000", 20, -7*24*time.Hour)
 	if err != nil {
 		return err
 	}

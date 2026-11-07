@@ -68,7 +68,7 @@ export function Onboard() {
       </div>
       {step === 1 && (
         <div className="flex flex-col gap-3">
-          <Field label="Your craft" placeholder="Makeup artist · Photographer · DJ" value={f.craft} onChange={(v) => setF({ ...f, craft: v })} />
+          <Field label="Your craft" placeholder="Photographer · Makeup artist · DJ" value={f.craft} onChange={(v) => setF({ ...f, craft: v })} />
           <Field label="Date of birth" optional placeholder="24-12-1998" value={f.birth_date} onChange={(v) => setF({ ...f, birth_date: v })} />
           <Field label="City" value={f.city} onChange={(v) => setF({ ...f, city: v })} />
         </div>
@@ -285,14 +285,14 @@ export function NewInvoice() {
     <Screen bottom={<Btn icon="send" onClick={create} disabled={busy || !f.title || !amount || !f.client_name}>Send invoice</Btn>}>
       <TopBar title="New invoice" back="/app" />
       <div className="flex flex-col gap-3.5">
-        <Field label="What's the job?" placeholder="Wedding makeup + 3 bridesmaids" value={f.title} onChange={(v) => setF({ ...f, title: v })} />
+        <Field label="What's the job?" placeholder="Wedding photography, full day" value={f.title} onChange={(v) => setF({ ...f, title: v })} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Amount (₦)" inputMode="decimal" placeholder="120,000" value={f.amount_ngn} onChange={(v) => setF({ ...f, amount_ngn: v })} />
           <Field label="Date" type="datetime-local" value={f.event_at} onChange={(v) => setF({ ...f, event_at: v })} />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Client name" placeholder="Tolu Adeyemi" value={f.client_name} onChange={(v) => setF({ ...f, client_name: v })} />
-          <Field label="Email" optional inputMode="email" placeholder="tolu@mail.com" value={f.client_email} onChange={(v) => setF({ ...f, client_email: v })} />
+          <Field label="Client name" placeholder="Aminat Bello" value={f.client_name} onChange={(v) => setF({ ...f, client_name: v })} />
+          <Field label="Email" optional inputMode="email" placeholder="aminat@mail.com" value={f.client_email} onChange={(v) => setF({ ...f, client_email: v })} />
         </div>
       </div>
       <div>
