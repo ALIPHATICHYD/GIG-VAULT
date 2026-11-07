@@ -398,8 +398,13 @@ func (s *Service) PollStale(ctx context.Context) error {
 				continue
 			}
 			st := strings.ToLower(pr.Status)
-			if st == "completed" || st == "funds_received" || st == "success" {
+			switch st {
+			case "completed", "funds_received", "success":
 				_ = s.MarkFunded(ctx, sg.gigID, pr.TargetAmount, "poll.payment_request."+st)
+			case "cancelled", "expired", "failed":
+				_, _ = s.DB.Exec(ctx, `UPDATE gigs SET busha_payment_request_id = NULL, updated_at = now() WHERE id = $1 AND status = $2`, sg.gigID, StatusAwaitingPayment)
+			default:
+				_, _ = s.DB.Exec(ctx, `UPDATE gigs SET updated_at = now() WHERE id = $1 AND status = $2`, sg.gigID, StatusAwaitingPayment)
 			}
 		} else {
 			trf, err := s.Busha.GetTransfer(ctx, sg.reqID)
@@ -408,8 +413,13 @@ func (s *Service) PollStale(ctx context.Context) error {
 				continue
 			}
 			st := strings.ToLower(trf.Status)
-			if st == "completed" || st == "funds_received" || st == "funds_converted" || st == "funds_delivered" {
+			switch st {
+			case "completed", "funds_received", "funds_converted", "funds_delivered":
 				_ = s.MarkFunded(ctx, sg.gigID, trf.TargetAmount, "poll.transfer."+st)
+			case "cancelled", "expired", "failed":
+				_, _ = s.DB.Exec(ctx, `UPDATE gigs SET busha_payment_request_id = NULL, updated_at = now() WHERE id = $1 AND status = $2`, sg.gigID, StatusAwaitingPayment)
+			default:
+				_, _ = s.DB.Exec(ctx, `UPDATE gigs SET updated_at = now() WHERE id = $1 AND status = $2`, sg.gigID, StatusAwaitingPayment)
 			}
 		}
 	}
@@ -449,6 +459,8 @@ func (s *Service) PollStale(ctx context.Context) error {
 			_ = s.CompletePayoutByTransfer(ctx, sp.transferID)
 		case "failed", "cancelled", "funds_not_delivered", "funds_refunded":
 			_ = s.FailPayoutByTransfer(ctx, sp.transferID, "poll.transfer."+st)
+		default:
+			_, _ = s.DB.Exec(ctx, `UPDATE payouts SET updated_at = now() WHERE id = $1 AND status = 'processing'`, sp.payoutID)
 		}
 	}
 	return nil
