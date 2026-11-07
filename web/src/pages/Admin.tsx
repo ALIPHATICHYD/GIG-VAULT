@@ -41,7 +41,11 @@ function AdminBody({ adminKey, onReset }: { adminKey: string; onReset: () => voi
   const r = rec.data;
 
   const busha = r?.busha_usdt_total != null ? Math.round(parseFloat(r.busha_usdt_total) * 1e6) : null;
-  const matched = r && busha != null ? Math.abs(busha - r.ledger_owed_usdt_micro) < 10_000 : null; // within 0.01 USDT
+  // Busha's balance must cover everything we owe. It can hold more (sandbox
+  // test funds, money not yet assigned to a gig), so "covered" is the test,
+  // not exact equality.
+  const matched = r && busha != null ? busha + 10_000 >= r.ledger_owed_usdt_micro : null; // 0.01 USDT tolerance
+  const extra = r && busha != null ? busha - r.ledger_owed_usdt_micro : 0;
   const parts = r ? [
     { label: "In escrow", v: r.escrow_usdt_micro, cls: "bg-lime" },
     { label: "Frozen in disputes", v: r.frozen_usdt_micro, cls: "bg-[#F2B544]" },
@@ -70,9 +74,9 @@ function AdminBody({ adminKey, onReset }: { adminKey: string; onReset: () => voi
             {matched === null ? (
               <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-bold">No Busha balance</span>
             ) : matched ? (
-              <span className="gv-pulse inline-flex items-center gap-1 rounded-full bg-lime px-3 py-1 text-xs font-extrabold text-dg"><Icon name="check" size={13} sw={2.4} />Matched</span>
+              <span className="gv-pulse inline-flex items-center gap-1 rounded-full bg-lime px-3 py-1 text-xs font-extrabold text-dg"><Icon name="check" size={13} sw={2.4} />Fully covered</span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-[#FF6B6B] px-3 py-1 text-xs font-extrabold text-white"><Icon name="alert" size={13} sw={2.2} />Mismatch</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#FF6B6B] px-3 py-1 text-xs font-extrabold text-white"><Icon name="alert" size={13} sw={2.2} />Short</span>
             )}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -87,6 +91,10 @@ function AdminBody({ adminKey, onReset }: { adminKey: string; onReset: () => voi
               <div className="text-[11px] text-white/50">USDT</div>
             </div>
           </div>
+          {matched && extra >= 10_000 && (
+            <div className="mt-3 text-xs text-white/60">Busha holds {u(extra)} USDT more than we owe. That's money not assigned to any gig, such as sandbox test funds.</div>
+          )}
+          {matched === false && <div className="mt-3 text-xs text-[#FFB4B4]">Busha holds less than our ledger owes. Check for a missed webhook or payout.</div>}
           {r.busha_error && <div className="mt-3 text-xs text-[#FFB4B4]">{r.busha_error}</div>}
         </Hero>
       )}
