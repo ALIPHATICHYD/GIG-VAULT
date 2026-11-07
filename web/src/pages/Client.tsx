@@ -6,7 +6,7 @@ import { coinNote, done as doneArt, split as splitArt } from "../art";
 import { Art, Avatar, DIcon, Icon, Lockup, Mark, type IconName } from "../brand";
 import {
   BottomNav, Btn, Card, CountdownBoxes, CountdownText, DisputePanel, ErrorNote, Field, Hero, KV, Money, Note,
-  Screen, SectionTitle, Seg, StatusChip, Steps, ThemeToggle, Timeline, TopBar, useAction, usePoll, type Step,
+  Screen, SectionTitle, StatusChip, Steps, ThemeToggle, Timeline, TopBar, useAction, usePoll, type Step,
 } from "../ui";
 import { LogoutButton } from "./Auth";
 
@@ -182,7 +182,6 @@ export function ClientMe() {
 export function Booking({ id }: { id: string }) {
   const g = usePoll(() => api.booking(id), 2000, [id]);
   const { busy, err, run } = useAction();
-  const [currency, setCurrency] = useState<"NGN" | "USDT">("NGN");
   const [reason, setReason] = useState("");
   const [raising, setRaising] = useState(false);
   const gig = g.data;
@@ -202,7 +201,7 @@ export function Booking({ id }: { id: string }) {
     : s === "DONE_PENDING" ? [{ title: "Rest releases by itself", sub: `Unless you raise an issue`, state: "now" }] : [];
 
   let bottom: ReactNode = undefined;
-  if (awaiting && !paying) bottom = <Btn disabled={busy} onClick={() => act(() => api.checkout(id, currency))}>Pay {currency === "NGN" ? naira(gig.amount_ngn_kobo) : "in USDT"} securely</Btn>;
+  if (awaiting && !paying) bottom = <Btn disabled={busy} onClick={() => act(() => api.checkout(id, "NGN"))}>Pay {naira(gig.amount_ngn_kobo)} securely</Btn>;
 
   return (
     <Screen bottom={bottom}>
@@ -215,7 +214,7 @@ export function Booking({ id }: { id: string }) {
             <div className="mt-1 flex justify-center"><Money kobo={gig.amount_ngn_kobo} size={40} /></div>
             <div className="text-[13px] text-mu">{gig.amount_usdt_micro ? `≈ ${usdt(gig.amount_usdt_micro)}, held by Busha` : "Held by Busha as dollars until you confirm"}</div>
           </div>
-          <Seg value={currency} onChange={setCurrency} options={[{ value: "NGN", label: "Naira (bank)" }, { value: "USDT", label: "USDT" }]} />
+          <PayWith />
           <InvoiceCard gig={gig} />
           <Promises gig={gig} />
         </>
@@ -392,6 +391,23 @@ function Receipt({ gig }: { gig: PublicGig }) {
       </Card>
       <Timeline events={gig.timeline} amountKobo={gig.amount_ngn_kobo} />
     </Screen>
+  );
+}
+
+/** Naira bank transfer for now. USDT is listed so clients know it is on the way. */
+function PayWith() {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-2xl bg-card px-4 py-3">
+      <span className="text-sm text-mu">Pay with</span>
+      <span className="relative">
+        <select defaultValue="NGN" aria-label="Pay with"
+          className="appearance-none rounded-full bg-circ py-2 pl-4 pr-9 text-sm font-bold text-ink outline-none">
+          <option value="NGN">Naira, bank transfer</option>
+          <option value="USDT" disabled>USDT (coming soon)</option>
+        </select>
+        <Icon name="chev" size={14} sw={2} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-mu" />
+      </span>
+    </label>
   );
 }
 
