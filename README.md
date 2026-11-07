@@ -64,34 +64,53 @@ make web                                    # http://localhost:5173
 make tunnel                                 # register https://<tunnel>/v1/webhooks/busha in the Busha dashboard
 ```
 
+## Who sees what
+
+One account system with two roles. Each role only ever sees its own screens.
+
+| Role | Screens | How they get in |
+|---|---|---|
+| Creator | `/onboard` (craft, BVN/NIN, bank via Busha) → `/app` wallet → **New gig link** modal → `/app/gigs/:id` (who booked, timeline, ledger) | Sign up as creator |
+| Client | `/pay/:id?t=…` preview → sign up / log in → `/bookings` → `/bookings/:id` (pay, mark done, complain, cancel) | Opens the link the creator sent (WhatsApp, copy) |
+
+Both sides know each other: the client sees the creator's name, craft and verified badge; the creator sees the client's name and email once they join. The link token proves the client was invited, and the first client to open it owns the booking.
+
+Demo logins (password `demo1234`): `chidinma@demo.gigvault` (creator), `tolu@demo.gigvault` (client).
+
 ## API
 
-Busha-style envelope: `{"status": "success"|"error", "message": "...", "data": ..., "code": "..."}`.
+Busha-style envelope: `{"status": "success"|"error", "message": "...", "data": ..., "code": "..."}`. Auth: `Authorization: Bearer <token>` from sign-up or login.
 
-| Method | Path | What it does |
-|---|---|---|
-| POST | `/v1/gigs` | Book a gig, creates the Busha payment request |
-| GET | `/v1/gigs/{id}` | Gig + audit timeline + ledger entries |
-| POST | `/v1/gigs/{id}/complete` | Client confirms done, starts complaint window |
-| POST | `/v1/gigs/{id}/complaints` | Freeze part of the remaining escrow |
-| POST | `/v1/gigs/{id}/complaints/resolve` | `{"outcome":"worker"|"client"}` |
-| POST | `/v1/gigs/{id}/cancel` | Refund; deposit kept on late cancel |
-| GET | `/v1/workers/{id}/wallet` | Available / locked / frozen, in naira |
-| POST | `/v1/workers/{id}/cashout` | `{"amount_ngn":"50000"}` |
-| POST | `/v1/webhooks/busha` | Signed Busha webhooks |
-| GET | `/v1/admin/reconciliation` | Ledger vs Busha balances |
-| POST | `/v1/dev/gigs/{id}/simulate-payment` | Dev only: sends a signed payment webhook through the real path |
+| Method | Path | Who | What it does |
+|---|---|---|---|
+| POST | `/v1/auth/signup` · `/v1/auth/login` | anyone | `role`: creator or client |
+| POST | `/v1/banks/resolve` · GET `/v1/banks` | anyone | Busha bank list and account-name check |
+| POST | `/v1/creator/onboard` | creator | Busha recipient + Busha customer + KYC link |
+| GET | `/v1/creator/wallet` | creator | Available / locked / frozen, in naira |
+| POST | `/v1/creator/gigs` | creator | Create a gig link to send to the client |
+| GET | `/v1/creator/gigs/{id}` | creator | Client, audit timeline, ledger |
+| POST | `/v1/creator/cashout` | creator | Busha quote + transfer to her bank |
+| GET | `/v1/pay/{id}?t=` | anyone with link | Gig preview |
+| POST | `/v1/client/claim/{id}` | client | Add the linked gig to My bookings |
+| GET | `/v1/client/bookings[/{id}]` | client | Bookings |
+| POST | `/v1/client/bookings/{id}/checkout` | client | Busha payment request (NGN bank transfer or USDT) |
+| POST | `/v1/client/bookings/{id}/complete` · `/complaints` · `/cancel` | client | Done, complain, cancel |
+| POST | `/v1/admin/gigs/{id}/complaints/resolve` | admin key | `{"outcome":"worker"|"client"}` |
+| GET | `/v1/admin/reconciliation` | admin key | Ledger vs Busha balances |
+| POST | `/v1/webhooks/busha` | Busha | Signed webhooks |
+| POST | `/v1/dev/gigs/{id}/simulate-payment` | dev only | Sends a signed payment webhook through the real path |
 
-Errors use real HTTP codes: 400 validation, 404 not found, 409 invalid state or insufficient funds, 401 bad webhook signature, 502 Busha error (with Busha's `X-Request-Id`).
+Errors use real HTTP codes: 400 validation, 401 not logged in or bad webhook signature, 403 wrong role, 404 not found (also for gigs that aren't yours), 409 invalid state or insufficient funds, 422 bank account not verified, 502 Busha error.
 
 ## Demo script (3 minutes)
 
 1. **Problem (30s):** Chidinma, 51% of Nigerian creatives deal with payment disputes, banks won't escrow a ₦30,000 nail appointment.
-2. **Client tab (45s):** book "Saturday wedding" for ₦120,000 and show the Busha bank account. Payment lands and the status turns *Locked*.
-3. **Chidinma tab (30s):** "₦120,000 locked for Saturday", ₦30,000 deposit already withdrawable.
-4. **Client marks done (30s):** countdown hits zero and the money lands in her wallet. No one pressed anything.
-5. **Cash out (15s):** ₦100,000 to GTBank via a Busha quote + transfer.
-6. **Timeline tab (30s):** audit trail, double-entry ledger, reconciliation against Busha. Mention duplicate webhooks are ignored.
+2. **Creator phone (30s):** Chidinma taps *New gig link*, "Saturday wedding, ₦120,000", sends it on WhatsApp.
+3. **Judge's phone (45s):** opens the link, sees who they're booking and the protection rules, signs up as a client, pays via Busha. Status turns *Locked*.
+4. **Creator phone (20s):** "₦120,000 locked", ₦30,000 deposit already withdrawable.
+5. **Judge marks done (30s):** countdown hits zero and the money lands in Chidinma's wallet. No one pressed anything.
+6. **Cash out (15s):** to GTBank via a Busha quote + transfer.
+7. **Gig detail (20s):** audit trail, double-entry ledger, reconciliation against Busha. Mention duplicate webhooks are ignored.
 
 ## Team
 

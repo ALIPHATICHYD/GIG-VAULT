@@ -26,7 +26,9 @@ type API interface {
 	ListBalances(ctx context.Context) ([]Balance, error)
 	ListBanks(ctx context.Context) (json.RawMessage, error)
 	ResolveBankAccount(ctx context.Context, bankCode, accountNumber string) (*ResolvedAccount, error)
-	CreateRecipient(ctx context.Context, body json.RawMessage) (json.RawMessage, error)
+	CreateRecipient(ctx context.Context, in RecipientInput) (*Recipient, error)
+	CreateCustomer(ctx context.Context, in CustomerInput) (*Customer, error)
+	KYCLink(ctx context.Context, customerID string) (string, error)
 	Mode() string
 }
 
@@ -53,6 +55,8 @@ type PaymentRequestInput struct {
 	SourceCurrency string `json:"source_currency"` // what the client pays in: NGN or USDT
 	TargetCurrency string `json:"target_currency"` // what we hold: USDT
 	SourceAmount   string `json:"source_amount,omitempty"`
+	QuoteCurrency  string `json:"quote_currency,omitempty"` // price in NGN, pay in USDT
+	QuoteAmount    string `json:"quote_amount,omitempty"`
 	PayIn          *PayIn `json:"pay_in,omitempty"`
 	Reference      string `json:"reference"`
 	AdditionalInfo struct {
@@ -122,6 +126,51 @@ type ResolvedAccount struct {
 	AccountNumber string `json:"account_number"`
 	BankCode      string `json:"bank_code"`
 	BankName      string `json:"bank_name"`
+}
+
+// RecipientInput is the 2025-07-11 recipient schema for a Nigerian bank account.
+type RecipientInput struct {
+	Type          string `json:"type"` // ngn_bank
+	Currency      string `json:"currency"`
+	CountryCode   string `json:"country_code"`
+	AccountName   string `json:"account_name"`
+	AccountNumber string `json:"account_number"`
+	BankCode      string `json:"bank_code"`
+	BankName      string `json:"bank_name,omitempty"`
+	Email         string `json:"email,omitempty"`
+}
+
+type Recipient struct {
+	ID   string `json:"id"`
+	Mock bool   `json:"mock,omitempty"`
+}
+
+type Address struct {
+	Street     string `json:"street"`
+	City       string `json:"city"`
+	State      string `json:"state"`
+	PostalCode string `json:"postal_code,omitempty"`
+	Country    string `json:"country"`
+}
+
+// CustomerInput creates an individual Busha customer (a profile we can act for
+// with X-BU-PROFILE-ID). KYC itself happens on Busha's hosted KYC link.
+type CustomerInput struct {
+	Email            string  `json:"email"`
+	HasAcceptedTerms bool    `json:"has_accepted_terms"`
+	Type             string  `json:"type"` // individual
+	CountryID        string  `json:"country_id"`
+	Phone            string  `json:"phone"`
+	BirthDate        string  `json:"birth_date"` // DD-MM-YYYY
+	FirstName        string  `json:"first_name"`
+	LastName         string  `json:"last_name"`
+	Address          Address `json:"address"`
+}
+
+type Customer struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Mock   bool   `json:"mock,omitempty"`
 }
 
 // Error is a non-2xx response from Busha. RequestID helps Busha support trace it.
@@ -255,7 +304,26 @@ func (c *Client) ResolveBankAccount(ctx context.Context, bankCode, accountNumber
 	return &out, c.do(ctx, http.MethodPost, "/v1/recipients/resolve-bank-account", body, &out)
 }
 
-func (c *Client) CreateRecipient(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
-	var out json.RawMessage
-	return out, c.do(ctx, http.MethodPost, "/v1/recipients", body, &out)
+func (c *Client) CreateRecipient(ctx context.Context, in RecipientInput) (*Recipient, error) {
+	var out Recipient
+	return &out, c.do(ctx, http.MethodPost, "/v1/recipients", in, &out)
+}
+
+func (c *Client) CreateCustomer(ctx context.Context, in CustomerInput) (*Customer, error) {
+	var out Customer
+	return &out, c.do(ctx, http.MethodPost, "/v1/customers", in, &out)
+}
+
+// KYCLink returns Busha's hosted KYC URL for a customer.
+func (c *Client) KYCLink(ctx context.Context, customerID string) (string, error) {
+	var out map[string]any
+	if err := c.do(ctx, http.MethodPost, "/v1/customers/"+customerID+"/kyc-link", map[string]any{}, &out); err != nil {
+		return "", err
+	}
+	for _, k := range []string{"url", "link", "kyc_link"} {
+		if v, ok := out[k].(string); ok && v != "" {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("busha: kyc-link response had no url")
 }

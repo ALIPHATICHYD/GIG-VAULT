@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliphatichyd/gig-vault/backend/internal/auth"
 	"github.com/aliphatichyd/gig-vault/backend/internal/busha"
 	"github.com/aliphatichyd/gig-vault/backend/internal/config"
 	"github.com/aliphatichyd/gig-vault/backend/internal/gigs"
@@ -91,7 +92,7 @@ func run(log *slog.Logger) error {
 	}}
 	go wk.Run(ctx)
 
-	srv := &http.Server{Addr: ":" + cfg.Port, Handler: (&httpapi.API{Svc: svc, Log: log}).Router(),
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: (&httpapi.API{Svc: svc, Log: log, Signer: auth.Signer{Secret: []byte(cfg.AuthSecret)}}).Router(),
 		ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

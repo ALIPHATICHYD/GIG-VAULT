@@ -29,6 +29,8 @@ type Config struct {
 
 	AllowDevRoutes bool
 	CORSOrigin     string
+	AuthSecret     string
+	AdminKey       string
 }
 
 func Load() (Config, error) {
@@ -48,6 +50,8 @@ func Load() (Config, error) {
 		MockRateNGN:        int64(envInt("MOCK_RATE_NGN", 1600)),
 		AllowDevRoutes:     env("ALLOW_DEV_ROUTES", "true") == "true",
 		CORSOrigin:         env("CORS_ORIGIN", "http://localhost:5173"),
+		AuthSecret:         env("AUTH_SECRET", "dev-auth-secret-change-me"),
+		AdminKey:           env("ADMIN_KEY", "dev-admin"),
 	}
 	if c.BushaMode != "mock" && c.BushaMode != "live" {
 		return c, fmt.Errorf("BUSHA_MODE must be mock or live, got %q", c.BushaMode)

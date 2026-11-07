@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,14 +14,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/aliphatichyd/gig-vault/backend/internal/auth"
 	"github.com/aliphatichyd/gig-vault/backend/internal/busha"
 	"github.com/aliphatichyd/gig-vault/backend/internal/gigs"
 )
 
 type API struct {
-	Svc *gigs.Service
-	Log *slog.Logger
+	Svc    *gigs.Service
+	Log    *slog.Logger
+	Signer auth.Signer
 }
+
+const sessionTTL = 7 * 24 * time.Hour
 
 func (a *API) Router() http.Handler {
 	r := chi.NewRouter()
@@ -32,21 +37,44 @@ func (a *API) Router() http.Handler {
 	})
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Get("/workers", a.listWorkers)
-		r.Post("/workers", a.createWorker)
-		r.Get("/workers/{id}/wallet", a.wallet)
-		r.Post("/workers/{id}/cashout", a.cashout)
+		// Accounts: one sign-up, role = creator | client.
+		r.Post("/auth/signup", a.signup)
+		r.Post("/auth/login", a.login)
+		r.With(a.Signer.Require("", fail)).Get("/me", a.me)
 
-		r.Get("/gigs", a.listGigs)
-		r.Post("/gigs", a.createGig)
-		r.Get("/gigs/{id}", a.getGig)
-		r.Post("/gigs/{id}/complete", a.completeGig)
-		r.Post("/gigs/{id}/complaints", a.complain)
-		r.Post("/gigs/{id}/complaints/resolve", a.resolve)
-		r.Post("/gigs/{id}/cancel", a.cancel)
-
+		// Public: anyone with the link can preview the gig before signing up.
+		r.Get("/pay/{id}", a.previewGig)
 		r.Get("/banks", a.banks)
-		r.Get("/admin/reconciliation", a.reconcile)
+		r.Post("/banks/resolve", a.resolveBank)
+
+		// Creator screens.
+		r.Group(func(r chi.Router) {
+			r.Use(a.Signer.Require(auth.Creator, fail))
+			r.Post("/creator/onboard", a.onboard)
+			r.Get("/creator/wallet", a.creatorWallet)
+			r.Post("/creator/gigs", a.createGigLink)
+			r.Get("/creator/gigs/{id}", a.creatorGig)
+			r.Post("/creator/cashout", a.creatorCashout)
+		})
+
+		// Client screens.
+		r.Group(func(r chi.Router) {
+			r.Use(a.Signer.Require(auth.Client, fail))
+			r.Post("/client/claim/{id}", a.claimGig)
+			r.Get("/client/bookings", a.clientBookings)
+			r.Get("/client/bookings/{id}", a.clientGig)
+			r.Post("/client/bookings/{id}/checkout", a.clientCheckout)
+			r.Post("/client/bookings/{id}/complete", a.clientAction("complete"))
+			r.Post("/client/bookings/{id}/complaints", a.clientAction("complain"))
+			r.Post("/client/bookings/{id}/cancel", a.clientAction("cancel"))
+		})
+
+		// Platform admin (X-Admin-Key).
+		r.Group(func(r chi.Router) {
+			r.Use(a.requireAdmin)
+			r.Post("/admin/gigs/{id}/complaints/resolve", a.resolve)
+			r.Get("/admin/reconciliation", a.reconcile)
+		})
 
 		r.Post("/webhooks/busha", a.bushaWebhook)
 
@@ -59,70 +87,154 @@ func (a *API) Router() http.Handler {
 	return r
 }
 
-// ---------- handlers ----------
+// ---------- accounts ----------
 
-func (a *API) listWorkers(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Svc.ListWorkers(r.Context())
-	a.respond(w, r, http.StatusOK, "workers retrieved", out, err)
+type sessionResp struct {
+	Token string     `json:"token"`
+	User  *gigs.User `json:"user"`
 }
 
-func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
-	var in gigs.CreateWorkerInput
+func (a *API) signup(w http.ResponseWriter, r *http.Request) {
+	var in gigs.SignupInput
 	if !decode(w, r, &in) {
 		return
 	}
-	out, err := a.Svc.CreateWorker(r.Context(), in)
-	a.respond(w, r, http.StatusCreated, "worker created", out, err)
+	u, err := a.Svc.Signup(r.Context(), in)
+	if err != nil {
+		a.respond(w, r, 0, "", nil, err)
+		return
+	}
+	ok(w, http.StatusCreated, "account created", sessionResp{a.Signer.Issue(u.ID, auth.Role(u.Role), sessionTTL), u})
 }
 
-func (a *API) wallet(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Svc.Wallet(r.Context(), chi.URLParam(r, "id"))
+func (a *API) login(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	u, err := a.Svc.Login(r.Context(), in.Email, in.Password)
+	if err != nil {
+		a.respond(w, r, 0, "", nil, err)
+		return
+	}
+	ok(w, http.StatusOK, "logged in", sessionResp{a.Signer.Issue(u.ID, auth.Role(u.Role), sessionTTL), u})
+}
+
+func (a *API) me(w http.ResponseWriter, r *http.Request) {
+	u, err := a.Svc.GetUser(r.Context(), sess(r).UserID)
+	a.respond(w, r, http.StatusOK, "me", u, err)
+}
+
+// ---------- creator ----------
+
+func (a *API) onboard(w http.ResponseWriter, r *http.Request) {
+	var in gigs.OnboardInput
+	if !decode(w, r, &in) {
+		return
+	}
+	out, err := a.Svc.OnboardCreator(r.Context(), sess(r).UserID, in)
+	a.respond(w, r, http.StatusCreated, "creator profile ready", out, err)
+}
+
+func (a *API) creatorWallet(w http.ResponseWriter, r *http.Request) {
+	wid, err := a.Svc.WorkerFor(r.Context(), sess(r).UserID)
+	if err != nil {
+		a.respond(w, r, 0, "", nil, err)
+		return
+	}
+	out, err := a.Svc.Wallet(r.Context(), wid)
 	a.respond(w, r, http.StatusOK, "wallet retrieved", out, err)
 }
 
-func (a *API) cashout(w http.ResponseWriter, r *http.Request) {
+func (a *API) createGigLink(w http.ResponseWriter, r *http.Request) {
+	var in gigs.CreateGigLinkInput
+	if !decode(w, r, &in) {
+		return
+	}
+	wid, err := a.Svc.WorkerFor(r.Context(), sess(r).UserID)
+	if err != nil {
+		a.respond(w, r, 0, "", nil, err)
+		return
+	}
+	out, err := a.Svc.CreateGigLink(r.Context(), wid, in)
+	a.respond(w, r, http.StatusCreated, "gig link created; send it to your client", out, err)
+}
+
+func (a *API) creatorGig(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.CreatorGig(r.Context(), sess(r).UserID, chi.URLParam(r, "id"))
+	a.respond(w, r, http.StatusOK, "gig retrieved", out, err)
+}
+
+func (a *API) creatorCashout(w http.ResponseWriter, r *http.Request) {
 	var in gigs.CashoutInput
 	if !decode(w, r, &in) {
 		return
 	}
-	out, err := a.Svc.Cashout(r.Context(), chi.URLParam(r, "id"), in)
+	wid, err := a.Svc.WorkerFor(r.Context(), sess(r).UserID)
+	if err != nil {
+		a.respond(w, r, 0, "", nil, err)
+		return
+	}
+	out, err := a.Svc.Cashout(r.Context(), wid, in)
 	a.respond(w, r, http.StatusCreated, "cash-out started", out, err)
 }
 
-func (a *API) listGigs(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Svc.ListGigs(r.Context(), r.URL.Query().Get("worker_id"))
-	a.respond(w, r, http.StatusOK, "gigs retrieved", out, err)
+// ---------- public + client ----------
+
+func (a *API) previewGig(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.PublicGig(r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("t"))
+	a.respond(w, r, http.StatusOK, "gig", out, err)
 }
 
-func (a *API) createGig(w http.ResponseWriter, r *http.Request) {
-	var in gigs.CreateGigInput
-	if !decode(w, r, &in) {
-		return
-	}
-	out, err := a.Svc.CreateGig(r.Context(), in)
-	a.respond(w, r, http.StatusCreated, "gig created; waiting for payment", out, err)
-}
-
-func (a *API) getGig(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Svc.GetGig(r.Context(), chi.URLParam(r, "id"))
-	a.respond(w, r, http.StatusOK, "gig retrieved", out, err)
-}
-
-func (a *API) completeGig(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Svc.Complete(r.Context(), chi.URLParam(r, "id"))
-	a.respond(w, r, http.StatusOK, "gig marked done; complaint window started", out, err)
-}
-
-func (a *API) complain(w http.ResponseWriter, r *http.Request) {
+func (a *API) claimGig(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Reason string `json:"reason"`
+		Token string `json:"token"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	out, err := a.Svc.Complain(r.Context(), chi.URLParam(r, "id"), in.Reason)
-	a.respond(w, r, http.StatusOK, "complaint opened; part of the payment is frozen", out, err)
+	out, err := a.Svc.ClaimGig(r.Context(), sess(r).UserID, chi.URLParam(r, "id"), in.Token)
+	a.respond(w, r, http.StatusOK, "gig added to your bookings", out, err)
 }
+
+func (a *API) clientBookings(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.ClientBookings(r.Context(), sess(r).UserID)
+	a.respond(w, r, http.StatusOK, "bookings", out, err)
+}
+
+func (a *API) clientGig(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.ClientGig(r.Context(), sess(r).UserID, chi.URLParam(r, "id"))
+	a.respond(w, r, http.StatusOK, "booking", out, err)
+}
+
+func (a *API) clientCheckout(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Currency string `json:"currency"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	out, err := a.Svc.ClientCheckout(r.Context(), sess(r).UserID, chi.URLParam(r, "id"), in.Currency)
+	a.respond(w, r, http.StatusOK, "pay using the details below", out, err)
+}
+
+func (a *API) clientAction(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Reason string `json:"reason"`
+		}
+		if r.ContentLength != 0 && !decode(w, r, &in) {
+			return
+		}
+		out, err := a.Svc.ClientAction(r.Context(), sess(r).UserID, chi.URLParam(r, "id"), action, in.Reason)
+		a.respond(w, r, http.StatusOK, action+" done", out, err)
+	}
+}
+
+// ---------- admin + misc ----------
 
 func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -135,19 +247,41 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	a.respond(w, r, http.StatusOK, "complaint resolved", out, err)
 }
 
-func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Svc.Cancel(r.Context(), chi.URLParam(r, "id"))
-	a.respond(w, r, http.StatusOK, "gig cancelled", out, err)
-}
-
 func (a *API) banks(w http.ResponseWriter, r *http.Request) {
 	out, err := a.Svc.Busha.ListBanks(r.Context())
 	a.respond(w, r, http.StatusOK, "banks retrieved", out, err)
 }
 
+func (a *API) resolveBank(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		BankCode      string `json:"bank_code"`
+		AccountNumber string `json:"account_number"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	out, err := a.Svc.ResolveBank(r.Context(), in.BankCode, in.AccountNumber)
+	a.respond(w, r, http.StatusOK, "account verified", out, err)
+}
+
 func (a *API) reconcile(w http.ResponseWriter, r *http.Request) {
 	out, err := a.Svc.Reconcile(r.Context())
 	a.respond(w, r, http.StatusOK, "reconciliation", out, err)
+}
+
+func (a *API) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Key")), []byte(a.Svc.Cfg.AdminKey)) != 1 {
+			fail(w, http.StatusUnauthorized, "unauthenticated", "admin key required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func sess(r *http.Request) auth.Session {
+	s, _ := auth.FromContext(r.Context())
+	return s
 }
 
 // bushaWebhook verifies the signature, stores the raw event, queues it and
@@ -254,7 +388,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 func (a *API) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", a.Svc.Cfg.CORSOrigin)
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Key")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

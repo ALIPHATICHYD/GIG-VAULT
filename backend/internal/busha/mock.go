@@ -48,6 +48,9 @@ func (m *Mock) convert(src, dst, amount string) string {
 }
 
 func (m *Mock) CreatePaymentRequest(_ context.Context, in PaymentRequestInput) (*PaymentRequest, error) {
+	if in.SourceAmount == "" && in.QuoteCurrency == "NGN" {
+		in.SourceAmount = m.convert("NGN", "USDT", in.QuoteAmount)
+	}
 	payIn := map[string]any{"type": "temporary_bank_account", "bank_name": "Busha Sandbox Bank (mock)",
 		"account_number": "99" + strconv.FormatInt(time.Now().UnixNano()%100000000, 10), "account_name": "GigVault Escrow",
 		"expires_at": time.Now().Add(30 * time.Minute)}
@@ -105,9 +108,20 @@ func (m *Mock) ListBanks(context.Context) (json.RawMessage, error) {
 }
 
 func (m *Mock) ResolveBankAccount(_ context.Context, bankCode, acct string) (*ResolvedAccount, error) {
-	return &ResolvedAccount{AccountName: "CHIDINMA OKAFOR (mock)", AccountNumber: acct, BankCode: bankCode, BankName: "Mock Bank"}, nil
+	if len(acct) != 10 {
+		return nil, &Error{Status: 422, Body: `{"message":"account number must be 10 digits"}`}
+	}
+	return &ResolvedAccount{AccountName: "VERIFIED ACCOUNT NAME (mock)", AccountNumber: acct, BankCode: bankCode, BankName: "Mock Bank"}, nil
 }
 
-func (m *Mock) CreateRecipient(context.Context, json.RawMessage) (json.RawMessage, error) {
-	return json.RawMessage(fmt.Sprintf(`{"id":"%s","mock":true}`, m.id("RCP"))), nil
+func (m *Mock) CreateRecipient(context.Context, RecipientInput) (*Recipient, error) {
+	return &Recipient{ID: m.id("RCP"), Mock: true}, nil
+}
+
+func (m *Mock) CreateCustomer(context.Context, CustomerInput) (*Customer, error) {
+	return &Customer{ID: m.id("CUS"), Status: "pending", Mock: true}, nil
+}
+
+func (m *Mock) KYCLink(_ context.Context, id string) (string, error) {
+	return "https://kyc.sandbox.busha.so/mock/" + id, nil
 }

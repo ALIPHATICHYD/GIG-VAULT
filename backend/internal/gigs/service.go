@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/aliphatichyd/gig-vault/backend/internal/auth"
 	"github.com/aliphatichyd/gig-vault/backend/internal/busha"
 	"github.com/aliphatichyd/gig-vault/backend/internal/config"
 	"github.com/aliphatichyd/gig-vault/backend/internal/ledger"
@@ -35,111 +35,7 @@ type Service struct {
 	Log   *slog.Logger
 }
 
-// ---------- booking ----------
-
-type CreateGigInput struct {
-	WorkerID    string    `json:"worker_id"`
-	Title       string    `json:"title"`
-	ClientName  string    `json:"client_name"`
-	ClientEmail string    `json:"client_email"`
-	EventAt     time.Time `json:"event_at"`
-	Amount      string    `json:"amount"`   // decimal string in Currency
-	Currency    string    `json:"currency"` // NGN (bank transfer) or USDT (client abroad)
-}
-
-func (s *Service) CreateGig(ctx context.Context, in CreateGigInput) (*Gig, error) {
-	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
-	if in.Currency == "" {
-		in.Currency = "NGN"
-	}
-	switch {
-	case in.WorkerID == "":
-		return nil, badRequest("validation_error", "worker_id is required")
-	case strings.TrimSpace(in.Title) == "":
-		return nil, badRequest("validation_error", "title is required")
-	case strings.TrimSpace(in.ClientName) == "" || !strings.Contains(in.ClientEmail, "@"):
-		return nil, badRequest("validation_error", "client_name and a valid client_email are required")
-	case in.EventAt.IsZero():
-		return nil, badRequest("validation_error", "event_at is required (RFC 3339)")
-	case in.Currency != "NGN" && in.Currency != "USDT":
-		return nil, badRequest("validation_error", "currency must be NGN or USDT")
-	}
-	if _, err := getWorker(ctx, s.DB, in.WorkerID); err != nil {
-		return nil, err
-	}
-
-	id := store.NewID("GIG")
-	payIn := &busha.PayIn{Type: "temporary_bank_account"}
-	if in.Currency == "USDT" {
-		payIn = &busha.PayIn{Type: "address", Network: "TRX"}
-	}
-	req := busha.PaymentRequestInput{SourceCurrency: in.Currency, TargetCurrency: "USDT", SourceAmount: in.Amount,
-		PayIn: payIn, Reference: id}
-	req.AdditionalInfo.Email = in.ClientEmail
-	req.AdditionalInfo.Name = in.ClientName
-
-	var amountKobo, usdtMicro int64
-	var rate float64
-	var err error
-	if in.Currency == "NGN" {
-		if amountKobo, err = ParseDecimal(in.Amount, 2); err != nil || amountKobo <= 0 {
-			return nil, badRequest("validation_error", "amount must be a positive number")
-		}
-	} else {
-		if usdtMicro, err = ParseDecimal(in.Amount, 6); err != nil || usdtMicro <= 0 {
-			return nil, badRequest("validation_error", "amount must be a positive number")
-		}
-	}
-
-	// Ask Busha for a payment request: NGN via a temporary bank account, or USDT
-	// to an on-chain address. Either way the funds settle to us as USDT.
-	pr, err := s.Busha.CreatePaymentRequest(ctx, req)
-	if err != nil {
-		return nil, upstream("could not create Busha payment request", err)
-	}
-	if t, err := ParseDecimal(pr.TargetAmount, 6); err == nil && t > 0 && in.Currency == "NGN" {
-		usdtMicro = t
-	}
-	if in.Currency == "NGN" && usdtMicro > 0 {
-		rate = float64(amountKobo) / 100 / (float64(usdtMicro) / 1e6)
-	}
-	if in.Currency == "USDT" {
-		rate = float64(s.Cfg.MockRateNGN)
-		if q, err := s.Busha.CreateQuote(ctx, busha.QuoteInput{SourceCurrency: "USDT", TargetCurrency: "NGN", SourceAmount: in.Amount}); err == nil {
-			if r, err := strconv.ParseFloat(q.Rate.Rate, 64); err == nil && r > 0 {
-				rate = r
-			}
-		}
-		amountKobo = usdtToKobo(usdtMicro, rate)
-	}
-	var usdtPtr *int64
-	if usdtMicro > 0 {
-		usdtPtr = &usdtMicro
-	}
-	var ratePtr *float64
-	if rate > 0 {
-		ratePtr = &rate
-	}
-
-	err = store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO gigs (id, worker_id, title, client_name, client_email, event_at, amount_ngn_kobo,
-			amount_usdt_micro, rate_ngn_per_usdt, deposit_bps, freeze_bps, complaint_window_seconds, status, pay_in_method,
-			busha_payment_request_id, payment_reference, payment_details)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-			id, in.WorkerID, in.Title, in.ClientName, in.ClientEmail, in.EventAt, amountKobo, usdtPtr, ratePtr,
-			s.Cfg.DepositBps, s.Cfg.FreezeBps, int(s.Cfg.ComplaintWindow.Seconds()), StatusAwaitingPayment, payIn.Type,
-			pr.ID, id, []byte(pr.PayIn))
-		if err != nil {
-			return err
-		}
-		return store.Audit(ctx, tx, id, in.WorkerID, "client", "gig.created", "", StatusAwaitingPayment,
-			map[string]any{"busha_payment_request_id": pr.ID, "currency": in.Currency, "amount": in.Amount, "busha_mode": s.Busha.Mode()})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return getGig(ctx, s.DB, id, false)
-}
+// ---------- booking: see links.go ----------
 
 // MarkFunded runs when Busha confirms the client paid. It is idempotent:
 // a redelivered webhook finds the gig already BOOKED and does nothing.
@@ -368,6 +264,7 @@ func (s *Service) Cancel(ctx context.Context, gigID string) (*Gig, error) {
 
 type GigDetail struct {
 	Gig        *Gig             `json:"gig"`
+	PayPath    string           `json:"pay_path"`
 	Worker     *Worker          `json:"worker"`
 	Balances   map[string]int64 `json:"balances_usdt_micro"`
 	Ledger     []ledger.Entry   `json:"ledger"`
@@ -403,6 +300,9 @@ func (s *Service) GetGig(ctx context.Context, id string) (*GigDetail, error) {
 		return nil, err
 	}
 	d := &GigDetail{Gig: g, Worker: w, Balances: map[string]int64{}, BushaMode: s.Busha.Mode()}
+	if g.ClientToken != "" {
+		d.PayPath = "/pay/" + g.ID + "?t=" + g.ClientToken
+	}
 	for k, acct := range map[string]string{"escrow": ledger.Escrow(id), "frozen": ledger.Frozen(id)} {
 		if d.Balances[k], err = ledger.Balance(ctx, s.DB, acct); err != nil {
 			return nil, err
@@ -483,29 +383,24 @@ func (s *Service) ListWorkers(ctx context.Context) ([]*Worker, error) {
 	return out, nil
 }
 
-type CreateWorkerInput struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Phone string `json:"phone"`
-}
-
-func (s *Service) CreateWorker(ctx context.Context, in CreateWorkerInput) (*Worker, error) {
-	if strings.TrimSpace(in.Name) == "" {
-		return nil, badRequest("validation_error", "name is required")
-	}
-	id := store.NewID("WRK")
-	if _, err := s.DB.Exec(ctx, `INSERT INTO workers (id, name, email, phone) VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''))`,
-		id, in.Name, in.Email, in.Phone); err != nil {
-		return nil, err
-	}
-	return getWorker(ctx, s.DB, id)
-}
-
 // EnsureDemoWorker seeds Chidinma so the demo works on a fresh database.
 func (s *Service) EnsureDemoWorker(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `INSERT INTO workers (id, name, email, phone, bank_name, account_number, account_name)
-		VALUES ('WRK_chidinma', 'Chidinma Okafor', 'chidinma@example.com', '+2348000000000', 'GTBank', '0123456789', 'CHIDINMA OKAFOR')
+	_, err := s.DB.Exec(ctx, `INSERT INTO workers (id, name, email, phone, bank_name, bank_code, account_number, account_name, craft, kyc_status)
+		VALUES ('WRK_chidinma', 'Chidinma Okafor', 'chidinma@example.com', '+2348000000000', 'GTBank', '000013', '0123456789',
+		        'CHIDINMA OKAFOR', 'Singer · Nail tech · Dancer', 'verified')
 		ON CONFLICT (id) DO NOTHING`)
+	if err != nil {
+		return err
+	}
+	// Demo logins (password: demo1234) so the two-phone demo needs no sign-up.
+	hash, err := auth.HashPassword("demo1234")
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(ctx, `INSERT INTO users (id, email, name, phone, role, password_hash, worker_id) VALUES
+		('USR_demo_creator', 'chidinma@demo.gigvault', 'Chidinma Okafor', '+2348000000000', 'creator', $1, 'WRK_chidinma'),
+		('USR_demo_client',  'tolu@demo.gigvault',     'Tolu Adeyemi',    '+2348000000001', 'client',  $1, NULL)
+		ON CONFLICT (id) DO NOTHING`, hash)
 	return err
 }
 

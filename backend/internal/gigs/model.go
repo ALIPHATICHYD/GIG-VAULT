@@ -34,8 +34,11 @@ type Gig struct {
 	ID                     string          `json:"id"`
 	WorkerID               string          `json:"worker_id"`
 	Title                  string          `json:"title"`
-	ClientName             string          `json:"client_name"`
-	ClientEmail            string          `json:"client_email"`
+	ClientName             *string         `json:"client_name"`
+	ClientEmail            *string         `json:"client_email"`
+	Note                   *string         `json:"note"`
+	PayCurrency            *string         `json:"pay_currency"`
+	ClientToken            string          `json:"-"`
 	EventAt                time.Time       `json:"event_at"`
 	AmountNGNKobo          int64           `json:"amount_ngn_kobo"`
 	AmountUSDTMicro        *int64          `json:"amount_usdt_micro"`
@@ -44,7 +47,7 @@ type Gig struct {
 	FreezeBps              int             `json:"freeze_bps"`
 	ComplaintWindowSeconds int             `json:"complaint_window_seconds"`
 	Status                 string          `json:"status"`
-	PayInMethod            string          `json:"pay_in_method"`
+	PayInMethod            *string         `json:"pay_in_method"`
 	BushaPaymentRequestID  *string         `json:"busha_payment_request_id"`
 	PaymentReference       *string         `json:"payment_reference"`
 	PaymentDetails         json.RawMessage `json:"payment_details"`
@@ -56,14 +59,15 @@ type Gig struct {
 
 const gigCols = `id, worker_id, title, client_name, client_email, event_at, amount_ngn_kobo, amount_usdt_micro,
 	rate_ngn_per_usdt::float8, deposit_bps, freeze_bps, complaint_window_seconds, status, pay_in_method,
-	busha_payment_request_id, payment_reference, payment_details, done_at, release_at, created_at, updated_at`
+	busha_payment_request_id, payment_reference, payment_details, done_at, release_at, created_at, updated_at,
+	note, pay_currency, COALESCE(client_token, '')`
 
 func scanGig(row pgx.Row) (*Gig, error) {
 	var g Gig
 	err := row.Scan(&g.ID, &g.WorkerID, &g.Title, &g.ClientName, &g.ClientEmail, &g.EventAt, &g.AmountNGNKobo,
 		&g.AmountUSDTMicro, &g.RateNGNPerUSDT, &g.DepositBps, &g.FreezeBps, &g.ComplaintWindowSeconds, &g.Status,
 		&g.PayInMethod, &g.BushaPaymentRequestID, &g.PaymentReference, &g.PaymentDetails, &g.DoneAt, &g.ReleaseAt,
-		&g.CreatedAt, &g.UpdatedAt)
+		&g.CreatedAt, &g.UpdatedAt, &g.Note, &g.PayCurrency, &g.ClientToken)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notFound("gig")
 	}
@@ -99,14 +103,21 @@ type Worker struct {
 	BankName         *string   `json:"bank_name"`
 	AccountNumber    *string   `json:"account_number"`
 	AccountName      *string   `json:"account_name"`
+	BankCode         *string   `json:"bank_code"`
+	Craft            *string   `json:"craft"`
+	IDType           *string   `json:"id_type"`
+	IDLast4          *string   `json:"id_last4"`
+	KYCStatus        string    `json:"kyc_status"`
+	KYCLink          *string   `json:"kyc_link"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
 func getWorker(ctx context.Context, db store.DBTX, id string) (*Worker, error) {
 	var w Worker
-	err := db.QueryRow(ctx, `SELECT id, name, email, phone, busha_customer_id, busha_recipient_id, bank_name, account_number, account_name, created_at
+	err := db.QueryRow(ctx, `SELECT id, name, email, phone, busha_customer_id, busha_recipient_id, bank_name, account_number, account_name,
+		bank_code, craft, id_type, id_last4, kyc_status, kyc_link, created_at
 		FROM workers WHERE id = $1`, id).Scan(&w.ID, &w.Name, &w.Email, &w.Phone, &w.BushaCustomerID, &w.BushaRecipientID,
-		&w.BankName, &w.AccountNumber, &w.AccountName, &w.CreatedAt)
+		&w.BankName, &w.AccountNumber, &w.AccountName, &w.BankCode, &w.Craft, &w.IDType, &w.IDLast4, &w.KYCStatus, &w.KYCLink, &w.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notFound("worker")
 	}
