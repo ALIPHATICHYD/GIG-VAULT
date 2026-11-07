@@ -137,7 +137,7 @@ Responses look like Busha's: `{"status": "success"|"error", "message": "...", "d
 
 | Who | Method and path | What it does |
 |---|---|---|
-| anyone | `POST /v1/auth/signup`, `POST /v1/auth/login` | `role`: `creator` or `client` |
+| anyone | `POST /v1/auth/signup`, `POST /v1/auth/login` | `role`: `creator` or `client`. Login allows 5 tries a minute per email and per IP, then 429 `too_many_attempts` |
 | creator | `POST /v1/creator/onboard` | Bank, BVN/NIN, Busha recipient + KYC link |
 | creator | `GET /v1/creator/wallet` | Withdrawable, locked, frozen (in naira) |
 | creator | `POST /v1/creator/gigs` | Send an invoice: `client_name`, `client_email`, `amount_ngn`, `upfront_percent`, `title`, `event_at` |

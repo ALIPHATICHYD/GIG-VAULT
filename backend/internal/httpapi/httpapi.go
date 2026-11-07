@@ -8,7 +8,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,17 +20,24 @@ import (
 	"github.com/aliphatichyd/gig-vault/backend/internal/auth"
 	"github.com/aliphatichyd/gig-vault/backend/internal/busha"
 	"github.com/aliphatichyd/gig-vault/backend/internal/gigs"
+	"github.com/aliphatichyd/gig-vault/backend/internal/ratelimit"
 )
 
 type API struct {
 	Svc    *gigs.Service
 	Log    *slog.Logger
 	Signer auth.Signer
+
+	// loginLimit throttles /v1/auth/login. Router builds it from config.
+	loginLimit *ratelimit.Limiter
 }
 
 const sessionTTL = 7 * 24 * time.Hour
 
 func (a *API) Router() http.Handler {
+	if a.loginLimit == nil {
+		a.loginLimit = ratelimit.New(a.Svc.Cfg.LoginRateLimit, a.Svc.Cfg.LoginRateWindow)
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, a.cors, a.logRequests)
 	r.Use(middleware.Timeout(30 * time.Second))
@@ -122,12 +132,37 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	// Throttle before touching the database or bcrypt, so a password-guessing
+	// run costs us nothing. Limited per IP and per email: the IP key stops one
+	// machine working through many accounts, the email key stops a botnet
+	// working through one account's passwords.
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+	for _, key := range []string{"ip:" + clientIP(r), "email:" + email} {
+		if allowed, retry := a.loginLimit.Allow(key); !allowed {
+			secs := int(retry.Seconds()) + 1
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			a.Log.Warn("login rate limited", "key", key, "ip", clientIP(r))
+			fail(w, http.StatusTooManyRequests, "too_many_attempts",
+				"too many login attempts; try again in "+strconv.Itoa(secs)+"s")
+			return
+		}
+	}
 	u, err := a.Svc.Login(r.Context(), in.Email, in.Password)
 	if err != nil {
 		a.respond(w, r, 0, "", nil, err)
 		return
 	}
 	ok(w, http.StatusOK, "logged in", sessionResp{a.Signer.Issue(u.ID, auth.Role(u.Role), sessionTTL), u})
+}
+
+// clientIP returns the caller's address. middleware.RealIP has already replaced
+// RemoteAddr with the forwarded address where there is a proxy, but a direct
+// connection still carries a port, which would make every request a new key.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func (a *API) me(w http.ResponseWriter, r *http.Request) {

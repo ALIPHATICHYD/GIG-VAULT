@@ -35,6 +35,10 @@ type Config struct {
 	CORSOrigin     string
 	AuthSecret     string
 	AdminKey       string
+
+	// Login throttling, per email and per IP. A zero limit disables it.
+	LoginRateLimit  int
+	LoginRateWindow time.Duration
 }
 
 func Load() (Config, error) {
@@ -60,6 +64,8 @@ func Load() (Config, error) {
 		CORSOrigin:         env("CORS_ORIGIN", "http://localhost:5173"),
 		AuthSecret:         env("AUTH_SECRET", "dev-auth-secret-change-me"),
 		AdminKey:           env("ADMIN_KEY", "dev-admin"),
+		LoginRateLimit:     envInt("LOGIN_RATE_LIMIT", 5),
+		LoginRateWindow:    envDur("LOGIN_RATE_WINDOW", time.Minute),
 	}
 	if c.BushaMode != "mock" && c.BushaMode != "live" {
 		return c, fmt.Errorf("BUSHA_MODE must be mock or live, got %q", c.BushaMode)
