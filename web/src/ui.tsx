@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { naira, usdt, type Dispute, type GigStatus, type TimelineEvent } from "./api";
 import { navigate } from "./router";
 import { useTheme } from "./theme";
@@ -7,11 +7,21 @@ import { DIcon, Icon, Strip, type IconName } from "./brand";
 export function usePoll<T>(fn: () => Promise<T>, ms = 2000, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const refresh = useCallback(() => {
-    fn().then((d) => { setData(d); setError(null); }).catch((e: Error) => setError(e.message));
+    // Skip a tick while the last request is still running, so slow responses
+    // never pile up into a queue of pending requests.
+    if (inFlight.current) return;
+    inFlight.current = true;
+    fn().then((d) => { setData(d); setError(null); }).catch((e: Error) => setError(e.message))
+      .finally(() => { inFlight.current = false; });
   }, deps);
-  useEffect(() => { refresh(); const t = setInterval(refresh, ms); return () => clearInterval(t); }, [refresh, ms]);
+  useEffect(() => {
+    refresh();
+    const t = setInterval(() => { if (!document.hidden) refresh(); }, ms);
+    return () => clearInterval(t);
+  }, [refresh, ms]);
   return { data, error, refresh };
 }
 
