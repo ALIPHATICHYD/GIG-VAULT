@@ -26,6 +26,12 @@ type DBTX interface {
 }
 
 func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
+	// Note: do not try to pin search_path here. Behind Neon's pooled endpoint
+	// a SET does not stick (the server connection goes back to the pool) and
+	// passing it as a startup parameter is rejected outright. The app relies on
+	// the default search_path, which is why nothing in it may ever run
+	// SET search_path on a pooled connection — see internal/store/storetest,
+	// which uses the direct endpoint for exactly this reason.
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
 		return nil, err

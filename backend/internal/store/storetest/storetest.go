@@ -43,6 +43,13 @@ func New(t *testing.T) *pgxpool.Pool {
 	ctx := context.Background()
 	schema := "gigvault_test_" + randomSuffix(t)
 
+	// Always use the direct endpoint. Neon's pooled endpoint (PgBouncer)
+	// refuses search_path as a startup parameter and does not keep a SET of it
+	// across transactions, so isolating a test in its own schema is impossible
+	// there — and a SET that does land leaks to whichever client is handed
+	// that server connection next, breaking unrelated processes.
+	url = direct(url)
+
 	// Create the schema on a connection of its own, before the pool exists, so
 	// every pooled connection can start with search_path already pointing at it.
 	admin, err := pgx.Connect(ctx, url)
@@ -74,20 +81,7 @@ func New(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("parse %s: %v", EnvVar, err)
 	}
-	// Neon's pooled endpoint (PgBouncer) silently discards the search_path
-	// startup parameter, which would send every migration to "public" and let
-	// tests see each other's rows. The direct endpoint is the same host without
-	// "-pooler", and there startup parameters and session state behave normally.
-	if direct := strings.Replace(cfg.ConnConfig.Host, "-pooler", "", 1); direct != cfg.ConnConfig.Host {
-		cfg.ConnConfig.Host = direct
-	}
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
-	// Belt and braces: if a pooler still strips the startup parameter, set it
-	// explicitly on each connection as it is established.
-	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
-		_, err := c.Exec(ctx, "SET search_path TO "+pgx.Identifier{schema}.Sanitize())
-		return err
-	}
 	cfg.MaxConns = 4
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -112,6 +106,14 @@ func New(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("migrate into %s: %v", schema, err)
 	}
 	return pool
+}
+
+// direct turns a Neon pooled connection string into the direct one by dropping
+// "-pooler" from the host. Any other DSN is returned unchanged. Rewriting the
+// string rather than the parsed host means the host fallbacks pgx derives from
+// it point at the direct endpoint too.
+func direct(dsn string) string {
+	return strings.Replace(dsn, "-pooler.", ".", 1)
 }
 
 func randomSuffix(t *testing.T) string {
