@@ -85,9 +85,10 @@ func (s *Service) Onboard(ctx context.Context, in OnboardInput) (*OnboardResult,
 	kycStatus := "not_started"
 	var customerID, kycLink *string
 	first, last := splitName(in.Name)
+	street := def(in.Street, "N/A")
 	cus, err := s.Busha.CreateCustomer(ctx, busha.CustomerInput{Email: in.Email, HasAcceptedTerms: true, Type: "individual",
 		CountryID: "NG", Phone: in.Phone, BirthDate: in.BirthDate, FirstName: first, LastName: last,
-		Address: busha.Address{Street: def(in.Street, "N/A"), City: def(in.City, "Lagos"), State: def(in.State, "Lagos"), Country: "NG"}})
+		Address: busha.Address{Street: street, AddressLine1: street, City: def(in.City, "Lagos"), State: def(in.State, "Lagos"), Country: "NG", CountryID: "NG"}})
 	if err != nil {
 		s.Log.Warn("busha customer create failed", "err", err)
 		res.Notes = append(res.Notes, "KYC not started on Busha yet: "+err.Error())
@@ -325,42 +326,90 @@ func (s *Service) Checkout(ctx context.Context, gigID, token string, in Checkout
 	}
 
 	naira := FormatMinor(g.AmountNGNKobo, 2)
-	req := busha.PaymentRequestInput{TargetCurrency: "USDT", Reference: g.ID}
-	req.AdditionalInfo.Email, req.AdditionalInfo.Name = in.ClientEmail, in.ClientName
+	var qIn busha.QuoteInput
 	if in.Currency == "NGN" {
-		req.SourceCurrency, req.SourceAmount = "NGN", naira
-		req.PayIn = &busha.PayIn{Type: "temporary_bank_account"}
+		qIn = busha.QuoteInput{
+			SourceCurrency: "NGN",
+			TargetCurrency: "USDT",
+			SourceAmount:   naira,
+			Reference:      g.ID,
+			PayIn:          &busha.PayIn{Type: "temporary_bank_account"},
+			PayOut:         &busha.PayOut{Type: "balance"},
+		}
 	} else {
-		req.SourceCurrency, req.QuoteCurrency, req.QuoteAmount = "USDT", "NGN", naira
-		req.PayIn = &busha.PayIn{Type: "address", Network: "TRX"}
+		qIn = busha.QuoteInput{
+			QuoteCurrency:  "NGN",
+			QuoteAmount:    naira,
+			SourceCurrency: "USDT",
+			TargetCurrency: "USDT",
+			Reference:      g.ID,
+			PayIn:          &busha.PayIn{Type: "address", Network: "TRX"},
+			PayOut:         &busha.PayOut{Type: "balance"},
+		}
 	}
-	pr, err := s.Busha.CreatePaymentRequest(ctx, req)
+	q, err := s.Busha.CreateQuote(ctx, qIn)
 	if err != nil {
-		return nil, upstream("could not create Busha payment request", err)
+		return nil, upstream("could not create Busha deposit quote", err)
+	}
+	trf, err := s.Busha.CreateTransfer(ctx, q.ID, g.ID)
+	if err != nil {
+		return nil, upstream("could not finalize Busha deposit transfer", err)
+	}
+	payDetails := normalizePayIn(trf.PayIn)
+	if len(payDetails) == 0 {
+		payDetails = normalizePayIn(q.PayIn)
+	}
+	targetAmt := trf.TargetAmount
+	if targetAmt == "" {
+		targetAmt = q.TargetAmount
 	}
 	var usdtPtr *int64
 	var ratePtr *float64
-	if t, err := ParseDecimal(pr.TargetAmount, 6); err == nil && t > 0 {
+	if t, err := ParseDecimal(targetAmt, 6); err == nil && t > 0 {
 		usdtPtr = &t
 		r := float64(g.AmountNGNKobo) / 100 / (float64(t) / 1e6)
 		ratePtr = &r
-	} else if r, err := strconv.ParseFloat(string(pr.Rate), 64); err == nil && r > 0 {
+	} else if r, err := strconv.ParseFloat(q.Rate.Rate, 64); err == nil && r > 0 {
 		ratePtr = &r
 	}
 	err = store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE gigs SET client_name=$2, client_email=$3, pay_currency=$4, pay_in_method=$5,
-			busha_payment_request_id=$6, payment_details=$7, amount_usdt_micro=$8, rate_ngn_per_usdt=$9, updated_at=now()
-			WHERE id=$1 AND status=$10`, g.ID, in.ClientName, in.ClientEmail, in.Currency, req.PayIn.Type, pr.ID,
-			[]byte(pr.PayIn), usdtPtr, ratePtr, StatusAwaitingPayment); err != nil {
+			busha_payment_request_id=$6, busha_quote_id=$7, payment_details=$8, amount_usdt_micro=$9, rate_ngn_per_usdt=$10, updated_at=now()
+			WHERE id=$1 AND status=$11`, g.ID, in.ClientName, in.ClientEmail, in.Currency, qIn.PayIn.Type, trf.ID, q.ID,
+			[]byte(payDetails), usdtPtr, ratePtr, StatusAwaitingPayment); err != nil {
 			return err
 		}
 		return store.Audit(ctx, tx, g.ID, g.WorkerID, "client", "gig.checkout_started", "", "",
-			map[string]any{"busha_payment_request_id": pr.ID, "currency": in.Currency, "busha_mode": s.Busha.Mode()})
+			map[string]any{"busha_transfer_id": trf.ID, "busha_quote_id": q.ID, "currency": in.Currency, "busha_mode": s.Busha.Mode()})
 	})
 	if err != nil {
 		return nil, err
 	}
 	return s.PublicGig(ctx, gigID, token)
+}
+
+// normalizePayIn flattens pay_in.recipient_details (returned by Busha on NGN
+// temporary_bank_account transfers) to the top level so the frontend can read
+// account_number, bank_name, and account_name directly.
+func normalizePayIn(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	if rd, ok := m["recipient_details"].(map[string]any); ok {
+		for _, k := range []string{"account_number", "bank_name", "account_name", "bank_code"} {
+			if _, exists := m[k]; !exists && rd[k] != nil {
+				m[k] = rd[k]
+			}
+		}
+		if out, err := json.Marshal(m); err == nil {
+			return out
+		}
+	}
+	return raw
 }
 
 func newToken() string {

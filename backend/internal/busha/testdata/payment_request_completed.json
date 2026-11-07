@@ -1,0 +1,21 @@
+{
+  "business_id": "BUS_jlKUYwF9z1ynQZ98bWbaP",
+  "event": "payment_request.completed",
+  "data": {
+    "id": "PAYR_dGK3Xv7kCswk",
+    "reference": "GIG_demo001",
+    "status": "completed",
+    "source_currency": "USDT",
+    "target_currency": "USDT",
+    "source_amount": "29.585432",
+    "target_amount": "29.585432",
+    "pay_in": {
+      "address": "TTc5HBAEETmqPTarVUU3xLB3fY7b1YxNzm",
+      "network": "TRX",
+      "type": "address"
+    },
+    "created_at": "2025-09-01T14:53:25.902853715Z",
+    "updated_at": "2025-09-01T14:55:10.112004Z"
+  }
+}
+

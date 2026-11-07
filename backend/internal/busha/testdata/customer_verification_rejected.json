@@ -1,0 +1,18 @@
+{
+  "business_id": "BUS_CQr0jPzGGzmn1uW5W7OVs",
+  "event": "customer.verification.rejected",
+  "data": {
+    "id": "CUS_Ikdb49NLsnlYU",
+    "business_id": "BUS_CQr0jPzGGzmn1uW5W7OVs",
+    "business_name": "",
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "customer@gmail.com",
+    "type": "individual",
+    "status": "rejected",
+    "level": "0",
+    "rejection_reason": "Invalid identification documents provided",
+    "created_at": "2026-01-27T09:23:09.317273Z",
+    "updated_at": "2026-01-27T10:30:45.789012Z"
+  }
+}

@@ -20,8 +20,9 @@ import (
 // sandbox is unreachable. Every mock response is labelled "mock": true.
 type API interface {
 	CreatePaymentRequest(ctx context.Context, in PaymentRequestInput) (*PaymentRequest, error)
+	GetPaymentRequest(ctx context.Context, id string) (*PaymentRequest, error)
 	CreateQuote(ctx context.Context, in QuoteInput) (*Quote, error)
-	CreateTransfer(ctx context.Context, quoteID string) (*Transfer, error)
+	CreateTransfer(ctx context.Context, quoteID, reference string) (*Transfer, error)
 	GetTransfer(ctx context.Context, id string) (*Transfer, error)
 	ListBalances(ctx context.Context) ([]Balance, error)
 	ListBanks(ctx context.Context) (json.RawMessage, error)
@@ -60,8 +61,9 @@ type PaymentRequestInput struct {
 	PayIn          *PayIn `json:"pay_in,omitempty"`
 	Reference      string `json:"reference"`
 	AdditionalInfo struct {
-		Email string `json:"email"`
-		Name  string `json:"name,omitempty"`
+		Email       string `json:"email"`
+		Name        string `json:"name,omitempty"`
+		PhoneNumber string `json:"phone_number,omitempty"`
 	} `json:"additional_info"`
 }
 
@@ -81,7 +83,10 @@ type QuoteInput struct {
 	TargetCurrency string  `json:"target_currency"`
 	SourceAmount   string  `json:"source_amount,omitempty"`
 	TargetAmount   string  `json:"target_amount,omitempty"`
+	QuoteCurrency  string  `json:"quote_currency,omitempty"`
+	QuoteAmount    string  `json:"quote_amount,omitempty"`
 	Reference      string  `json:"reference,omitempty"`
+	PayIn          *PayIn  `json:"pay_in,omitempty"`
 	PayOut         *PayOut `json:"pay_out,omitempty"`
 }
 
@@ -92,24 +97,30 @@ type Rate struct {
 }
 
 type Quote struct {
-	ID             string    `json:"id"`
-	SourceCurrency string    `json:"source_currency"`
-	TargetCurrency string    `json:"target_currency"`
-	SourceAmount   string    `json:"source_amount"`
-	TargetAmount   string    `json:"target_amount"`
-	Rate           Rate      `json:"rate"`
-	Status         string    `json:"status"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	Mock           bool      `json:"mock,omitempty"`
+	ID             string          `json:"id"`
+	ProfileID      string          `json:"profile_id,omitempty"`
+	SourceCurrency string          `json:"source_currency"`
+	TargetCurrency string          `json:"target_currency"`
+	SourceAmount   string          `json:"source_amount"`
+	TargetAmount   string          `json:"target_amount"`
+	Rate           Rate            `json:"rate"`
+	PayIn          json.RawMessage `json:"pay_in,omitempty"`
+	PayOut         json.RawMessage `json:"pay_out,omitempty"`
+	Status         string          `json:"status"`
+	ExpiresAt      time.Time       `json:"expires_at"`
+	Mock           bool            `json:"mock,omitempty"`
 }
 
 type Transfer struct {
-	ID           string `json:"id"`
-	QuoteID      string `json:"quote_id"`
-	Status       string `json:"status"`
-	SourceAmount string `json:"source_amount"`
-	TargetAmount string `json:"target_amount"`
-	Mock         bool   `json:"mock,omitempty"`
+	ID           string          `json:"id"`
+	ProfileID    string          `json:"profile_id,omitempty"`
+	QuoteID      string          `json:"quote_id"`
+	Reference    string          `json:"reference,omitempty"`
+	Status       string          `json:"status"`
+	SourceAmount string          `json:"source_amount"`
+	TargetAmount string          `json:"target_amount"`
+	PayIn        json.RawMessage `json:"pay_in,omitempty"`
+	Mock         bool            `json:"mock,omitempty"`
 }
 
 type Balance struct {
@@ -146,11 +157,13 @@ type Recipient struct {
 }
 
 type Address struct {
-	Street     string `json:"street"`
-	City       string `json:"city"`
-	State      string `json:"state"`
-	PostalCode string `json:"postal_code,omitempty"`
-	Country    string `json:"country"`
+	Street       string `json:"street,omitempty"`
+	AddressLine1 string `json:"address_line_1,omitempty"`
+	City         string `json:"city"`
+	State        string `json:"state"`
+	PostalCode   string `json:"postal_code,omitempty"`
+	Country      string `json:"country,omitempty"`
+	CountryID    string `json:"country_id,omitempty"`
 }
 
 // CustomerInput creates an individual Busha customer (a profile we can act for
@@ -189,6 +202,7 @@ func (e *Error) Error() string {
 type Client struct {
 	baseURL   string
 	secretKey string
+	publicKey string
 	profileID string
 	http      *http.Client
 	log       *slog.Logger
@@ -199,16 +213,29 @@ func NewClient(baseURL, secretKey, profileID string, log *slog.Logger) *Client {
 		http: &http.Client{Timeout: 20 * time.Second}, log: log}
 }
 
+func (c *Client) WithPublicKey(publicKey string) *Client {
+	c.publicKey = publicKey
+	return c
+}
+
 func (c *Client) Mode() string { return "live" }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	var rdr io.Reader
+	return c.doWithAuth(ctx, method, path, body, out, false)
+}
+
+func (c *Client) doPublic(ctx context.Context, method, path string, body any, out any) error {
+	return c.doWithAuth(ctx, method, path, body, out, true)
+}
+
+func (c *Client) doWithAuth(ctx context.Context, method, path string, body any, out any, usePublicKey bool) error {
+	var payloadBytes []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		rdr = bytes.NewReader(b)
+		payloadBytes = b
 	}
 	// Retry only on network errors and 429/5xx, and only for idempotent GETs,
 	// so we never create two quotes or transfers by accident.
@@ -221,11 +248,19 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		if i > 0 {
 			time.Sleep(time.Duration(i*i) * 300 * time.Millisecond)
 		}
+		var rdr io.Reader
+		if payloadBytes != nil {
+			rdr = bytes.NewReader(payloadBytes)
+		}
 		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
 		if err != nil {
 			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+c.secretKey)
+		if usePublicKey && c.publicKey != "" {
+			req.Header.Set("X-BU-PUBLIC-KEY", c.publicKey)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+c.secretKey)
+		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 		if c.profileID != "" {
@@ -269,7 +304,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 
 func (c *Client) CreatePaymentRequest(ctx context.Context, in PaymentRequestInput) (*PaymentRequest, error) {
 	var out PaymentRequest
-	return &out, c.do(ctx, http.MethodPost, "/v1/payments/requests", in, &out)
+	return &out, c.doPublic(ctx, http.MethodPost, "/v1/payments/requests", in, &out)
+}
+
+func (c *Client) GetPaymentRequest(ctx context.Context, id string) (*PaymentRequest, error) {
+	var out PaymentRequest
+	return &out, c.doPublic(ctx, http.MethodGet, "/v1/payments/requests/"+id, nil, &out)
 }
 
 func (c *Client) CreateQuote(ctx context.Context, in QuoteInput) (*Quote, error) {
@@ -277,9 +317,9 @@ func (c *Client) CreateQuote(ctx context.Context, in QuoteInput) (*Quote, error)
 	return &out, c.do(ctx, http.MethodPost, "/v1/quotes", in, &out)
 }
 
-func (c *Client) CreateTransfer(ctx context.Context, quoteID string) (*Transfer, error) {
+func (c *Client) CreateTransfer(ctx context.Context, quoteID, reference string) (*Transfer, error) {
 	var out Transfer
-	return &out, c.do(ctx, http.MethodPost, "/v1/transfers", map[string]string{"quote_id": quoteID}, &out)
+	return &out, c.do(ctx, http.MethodPost, "/v1/transfers", map[string]string{"quote_id": quoteID, "reference": reference}, &out)
 }
 
 func (c *Client) GetTransfer(ctx context.Context, id string) (*Transfer, error) {

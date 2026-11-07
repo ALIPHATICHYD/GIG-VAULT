@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -69,8 +70,10 @@ func (s *Service) Cashout(ctx context.Context, workerID string, in CashoutInput)
 		return nil, conflict("no_bank_account", "add a bank account (Busha recipient) before cashing out")
 	}
 
-	q, err := s.Busha.CreateQuote(ctx, busha.QuoteInput{SourceCurrency: "USDT", TargetCurrency: "NGN",
-		TargetAmount: in.AmountNGN, PayOut: &busha.PayOut{Type: "bank_transfer", RecipientID: recipient}})
+	payoutID := store.NewID("PAY")
+	quoteInput := busha.QuoteInput{SourceCurrency: "USDT", TargetCurrency: "NGN", TargetAmount: in.AmountNGN,
+		Reference: payoutID, PayOut: &busha.PayOut{Type: "bank_transfer", RecipientID: recipient}}
+	q, err := s.Busha.CreateQuote(ctx, quoteInput)
 	if err != nil {
 		return nil, upstream("could not get a cash-out quote from Busha", err)
 	}
@@ -79,7 +82,7 @@ func (s *Service) Cashout(ctx context.Context, workerID string, in CashoutInput)
 		return nil, upstream("Busha quote had no source amount", err)
 	}
 
-	p := &Payout{ID: store.NewID("PAY"), AmountUSDTMicro: usdt, AmountNGNKobo: kobo, BushaQuoteID: &q.ID, Status: "processing"}
+	p := &Payout{ID: payoutID, AmountUSDTMicro: usdt, AmountNGNKobo: kobo, BushaQuoteID: &q.ID, Status: "processing"}
 	err = store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
 		if _, err := ledger.Move(ctx, tx, "payout:"+p.ID, "payout", "", ledger.Worker(workerID), ledger.ExternalPayout, usdt); err != nil {
 			if errors.Is(err, ledger.ErrInsufficientFunds) {
@@ -98,7 +101,21 @@ func (s *Service) Cashout(ctx context.Context, workerID string, in CashoutInput)
 		return nil, err
 	}
 
-	t, terr := s.Busha.CreateTransfer(ctx, q.ID)
+	t, terr := s.Busha.CreateTransfer(ctx, q.ID, p.ID)
+	if isExpiredQuote(terr) {
+		q, terr = s.Busha.CreateQuote(ctx, quoteInput)
+		if terr == nil {
+			newUSDT, parseErr := ParseDecimal(q.SourceAmount, 6)
+			if parseErr != nil || newUSDT <= 0 {
+				terr = errors.New("Busha re-quote had no source amount")
+			} else if err := s.adjustPayoutReservation(ctx, p, newUSDT); err != nil {
+				terr = err
+			} else {
+				p.AmountUSDTMicro, p.BushaQuoteID = newUSDT, &q.ID
+				_, terr = s.Busha.CreateTransfer(ctx, q.ID, p.ID)
+			}
+		}
+	}
 	if terr != nil {
 		_ = s.failPayout(ctx, p.ID, terr.Error())
 		return nil, upstream("Busha transfer failed; your balance was restored", terr)
@@ -114,6 +131,43 @@ func (s *Service) Cashout(ctx context.Context, workerID string, in CashoutInput)
 		_ = store.Enqueue(ctx, s.DB, JobMockSettlement, map[string]string{"transfer_id": t.ID}, "mock_settle:"+t.ID, time.Now().Add(3*time.Second))
 	}
 	return p, nil
+}
+
+func isExpiredQuote(err error) bool {
+	if err == nil {
+		return false
+	}
+	var be *busha.Error
+	if !errors.As(err, &be) {
+		return false
+	}
+	body := strings.ToLower(be.Body)
+	return strings.Contains(body, "quote") && strings.Contains(body, "expir")
+}
+
+func (s *Service) adjustPayoutReservation(ctx context.Context, p *Payout, newUSDT int64) error {
+	delta := newUSDT - p.AmountUSDTMicro
+	if delta == 0 {
+		return nil
+	}
+	return store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
+		from, to := ledger.Worker(""), ledger.ExternalPayout
+		if delta < 0 {
+			from, to, delta = ledger.ExternalPayout, ledger.Worker(""), -delta
+		}
+		// The worker account is filled by the payout row lookup inside the transaction.
+		var workerID string
+		if err := tx.QueryRow(ctx, `SELECT worker_id FROM payouts WHERE id = $1 FOR UPDATE`, p.ID).Scan(&workerID); err != nil {
+			return err
+		}
+		if from == ledger.Worker("") {
+			from = ledger.Worker(workerID)
+		} else {
+			to = ledger.Worker(workerID)
+		}
+		_, err := ledger.Move(ctx, tx, "payout_quote_adjustment:"+p.ID, "payout_quote_adjustment", "", from, to, delta)
+		return err
+	})
 }
 
 func (s *Service) CompletePayoutByTransfer(ctx context.Context, transferID string) error {
@@ -231,20 +285,47 @@ func (s *Service) ProcessEvent(ctx context.Context, eventRowID int64) error {
 	if err := json.Unmarshal(payload, &ev); err != nil {
 		return s.markEvent(ctx, eventRowID, err)
 	}
-	var d struct {
-		busha.EventData
-		TargetAmount string `json:"target_amount"`
-	}
+	var d busha.EventData
 	_ = json.Unmarshal(ev.Data, &d)
 
 	var err error
 	switch name {
-	case "payment_request.completed", "deposit.success":
-		err = s.MarkFunded(ctx, d.Reference, d.TargetAmount, name)
+	case "payment_request.completed", "deposit.success", "transfer.funds_received", "transfer.funds_converted", "ramp.transfer.completed":
+		ref := d.Reference
+		if ref == "" {
+			ref = d.ID
+		}
+		err = s.MarkFunded(ctx, ref, d.TargetAmount, name)
+		if ae, ok := AsAppError(err); ok && ae.HTTP == 404 && d.ID != "" && d.ID != ref {
+			err = s.MarkFunded(ctx, d.ID, d.TargetAmount, name)
+		}
+		if ae, ok := AsAppError(err); ok && ae.HTTP == 404 && d.QuoteID != "" {
+			err = s.MarkFunded(ctx, d.QuoteID, d.TargetAmount, name)
+		}
 	case "transfer.funds_delivered", "transfer.completed":
-		err = s.CompletePayoutByTransfer(ctx, d.ID)
+		// A completed transfer can be either a client deposit (quote + transfer) or a creator cash-out.
+		var gigID string
+		_ = s.DB.QueryRow(ctx, `SELECT id FROM gigs WHERE busha_payment_request_id = $1 OR payment_reference = $2 OR busha_quote_id = $3 LIMIT 1`,
+			d.ID, d.Reference, d.QuoteID).Scan(&gigID)
+		if gigID != "" {
+			err = s.MarkFunded(ctx, gigID, d.TargetAmount, name)
+		} else {
+			err = s.CompletePayoutByTransfer(ctx, d.ID)
+		}
 	case "transfer.failed", "transfer.funds_not_delivered", "transfer.funds_refunded", "transfer.cancelled":
 		err = s.FailPayoutByTransfer(ctx, d.ID, name)
+	case "customer.verification.active":
+		custID := d.ID
+		if custID == "" {
+			custID = d.CustomerID
+		}
+		err = s.UpdateWorkerKYC(ctx, custID, "verified", name)
+	case "customer.verification.rejected":
+		custID := d.ID
+		if custID == "" {
+			custID = d.CustomerID
+		}
+		err = s.UpdateWorkerKYC(ctx, custID, "rejected", name)
 	default:
 		s.Log.Info("ignoring busha event", "event", name)
 	}
@@ -255,6 +336,122 @@ func (s *Service) ProcessEvent(ctx context.Context, eventRowID int64) error {
 		return err // transient: job retries
 	}
 	return s.markEvent(ctx, eventRowID, nil)
+}
+
+// UpdateWorkerKYC updates workers.kyc_status when Busha sends a customer verification webhook.
+func (s *Service) UpdateWorkerKYC(ctx context.Context, bushaCustomerID, kycStatus, event string) error {
+	if bushaCustomerID == "" {
+		return nil
+	}
+	return store.InTx(ctx, s.DB, func(tx pgx.Tx) error {
+		var workerID, prevStatus string
+		err := tx.QueryRow(ctx, `SELECT id, kyc_status FROM workers WHERE busha_customer_id = $1 FOR UPDATE`, bushaCustomerID).Scan(&workerID, &prevStatus)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if prevStatus == kycStatus {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE workers SET kyc_status = $2 WHERE id = $1`, workerID, kycStatus); err != nil {
+			return err
+		}
+		action := "worker.kyc_" + kycStatus
+		return store.Audit(ctx, tx, "", workerID, "busha", action, prevStatus, kycStatus,
+			map[string]any{"busha_customer_id": bushaCustomerID, "event": event})
+	})
+}
+
+// PollStale checks Busha directly for any payment request or transfer that has been
+// stuck in a pending/processing state for more than 2 minutes (missed-webhook fallback).
+func (s *Service) PollStale(ctx context.Context) error {
+	// 1. Check gigs awaiting payment for > 2 minutes.
+	gigRows, err := s.DB.Query(ctx, `SELECT id, busha_payment_request_id FROM gigs
+		WHERE status = $1 AND busha_payment_request_id IS NOT NULL
+		  AND updated_at < now() - interval '2 minutes'
+		ORDER BY updated_at ASC LIMIT 50`, StatusAwaitingPayment)
+	if err != nil {
+		return err
+	}
+	type staleGig struct {
+		gigID string
+		reqID string
+	}
+	var staleGigs []staleGig
+	for gigRows.Next() {
+		var sg staleGig
+		if err := gigRows.Scan(&sg.gigID, &sg.reqID); err != nil {
+			gigRows.Close()
+			return err
+		}
+		staleGigs = append(staleGigs, sg)
+	}
+	gigRows.Close()
+
+	for _, sg := range staleGigs {
+		if strings.HasPrefix(sg.reqID, "PAYR") {
+			pr, err := s.Busha.GetPaymentRequest(ctx, sg.reqID)
+			if err != nil {
+				s.Log.Warn("poll stale payment request failed", "gig_id", sg.gigID, "id", sg.reqID, "err", err)
+				continue
+			}
+			st := strings.ToLower(pr.Status)
+			if st == "completed" || st == "funds_received" || st == "success" {
+				_ = s.MarkFunded(ctx, sg.gigID, pr.TargetAmount, "poll.payment_request."+st)
+			}
+		} else {
+			trf, err := s.Busha.GetTransfer(ctx, sg.reqID)
+			if err != nil {
+				s.Log.Warn("poll stale deposit transfer failed", "gig_id", sg.gigID, "id", sg.reqID, "err", err)
+				continue
+			}
+			st := strings.ToLower(trf.Status)
+			if st == "completed" || st == "funds_received" || st == "funds_converted" || st == "funds_delivered" {
+				_ = s.MarkFunded(ctx, sg.gigID, trf.TargetAmount, "poll.transfer."+st)
+			}
+		}
+	}
+
+	// 2. Check payouts stuck in processing for > 2 minutes.
+	payoutRows, err := s.DB.Query(ctx, `SELECT id, busha_transfer_id FROM payouts
+		WHERE status = 'processing' AND busha_transfer_id IS NOT NULL
+		  AND updated_at < now() - interval '2 minutes'
+		ORDER BY updated_at ASC LIMIT 50`)
+	if err != nil {
+		return err
+	}
+	type stalePayout struct {
+		payoutID   string
+		transferID string
+	}
+	var stalePayouts []stalePayout
+	for payoutRows.Next() {
+		var sp stalePayout
+		if err := payoutRows.Scan(&sp.payoutID, &sp.transferID); err != nil {
+			payoutRows.Close()
+			return err
+		}
+		stalePayouts = append(stalePayouts, sp)
+	}
+	payoutRows.Close()
+
+	for _, sp := range stalePayouts {
+		trf, err := s.Busha.GetTransfer(ctx, sp.transferID)
+		if err != nil {
+			s.Log.Warn("poll stale payout transfer failed", "payout_id", sp.payoutID, "transfer_id", sp.transferID, "err", err)
+			continue
+		}
+		st := strings.ToLower(trf.Status)
+		switch st {
+		case "completed", "funds_delivered":
+			_ = s.CompletePayoutByTransfer(ctx, sp.transferID)
+		case "failed", "cancelled", "funds_not_delivered", "funds_refunded":
+			_ = s.FailPayoutByTransfer(ctx, sp.transferID, "poll.transfer."+st)
+		}
+	}
+	return nil
 }
 
 func (s *Service) markEvent(ctx context.Context, id int64, cause error) error {
@@ -278,6 +475,9 @@ func (s *Service) IngestEvent(ctx context.Context, raw []byte) (duplicate bool, 
 	ref := d.ID
 	if ref == "" {
 		ref = d.Reference
+	}
+	if ref == "" {
+		ref = d.CustomerID
 	}
 	if ref == "" {
 		return false, badRequest("invalid_payload", "event has no id or reference")

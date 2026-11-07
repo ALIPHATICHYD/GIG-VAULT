@@ -1,0 +1,15 @@
+{
+  "business_id": "BUS_jlKUYwF9z1ynQZ98bWbaP",
+  "event": "transfer.failed",
+  "data": {
+    "id": "TRF_99FailedExample",
+    "quote_id": "QUO_99FailedExample",
+    "reference": "PAY_cashout002",
+    "status": "failed",
+    "source_currency": "USDT",
+    "target_currency": "NGN",
+    "source_amount": "31.250000",
+    "target_amount": "50000.00"
+  }
+}
+

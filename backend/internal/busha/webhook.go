@@ -36,8 +36,10 @@ type Event struct {
 
 // EventData holds the fields we read across event types.
 type EventData struct {
-	ID        string `json:"id"`
-	Reference string `json:"reference"`
-	Status    string `json:"status"`
-	QuoteID   string `json:"quote_id"`
+	ID           string `json:"id"`
+	CustomerID   string `json:"customer_id"`
+	Reference    string `json:"reference"`
+	Status       string `json:"status"`
+	QuoteID      string `json:"quote_id"`
+	TargetAmount string `json:"target_amount"`
 }

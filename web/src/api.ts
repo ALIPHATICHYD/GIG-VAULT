@@ -98,6 +98,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...(s ? { Authorization: `Bearer ${s.token}` } : {}),
       ...(init?.headers ?? {}),
     },
