@@ -2,6 +2,7 @@ package gigs
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 )
@@ -36,10 +37,13 @@ func FormatMinor(v int64, decimals int) string {
 // bps returns amount * bps / 10000, rounded down (the remainder stays in escrow).
 func bps(amount int64, b int) int64 { return amount * int64(b) / 10000 }
 
-// usdtToKobo converts USDT micro-units to NGN kobo at rate (NGN per USDT).
+// usdtToKobo converts USDT micro-units to NGN kobo at rate (NGN per USDT),
+// rounded to the nearest whole naira. It is only a display estimate: going
+// NGN -> USDT -> NGN loses fractions of a kobo, and truncating turned a
+// 100,000 naira upfront into 99,999.
 func usdtToKobo(micro int64, rate float64) int64 {
 	if rate <= 0 {
 		return 0
 	}
-	return int64(float64(micro) / 1e6 * rate * 100)
+	return int64(math.Round(float64(micro)/1e6*rate)) * 100
 }
