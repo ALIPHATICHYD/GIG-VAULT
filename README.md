@@ -75,7 +75,27 @@ DISPUTE_WINDOW=2m
 | Peter | `backend/internal/gigs/`, `backend/internal/ledger/` | Invoices, escrow rules, disputes, ledger, wallet, cash-out |
 | ALIPHATIC | `web/src/pages/` | `Creator.tsx`, `Client.tsx`, `Auth.tsx` screens; shared UI in `web/src/ui.tsx` |
 
-Run the backend checks with `make test`.
+### Running the tests
+
+```bash
+cd backend && go vet ./... && go test ./...     # or: make test
+```
+
+The ledger and invoice-lifecycle tests need a real Postgres, because what they check is enforced
+by the database: the append-only trigger, the unique idempotency key, transaction rollback. Set
+`TEST_DATABASE_URL` to a throwaway database and they run; leave it unset and they skip, so the
+command above passes either way.
+
+```bash
+TEST_DATABASE_URL='postgresql://...neon.tech/test?sslmode=require' go test ./...
+```
+
+Create a **Neon branch** for it rather than using your dev database. Each test runs in its own
+schema, created and dropped automatically, so nothing else in the database is touched.
+
+Use the **direct** connection string, not the `-pooler` one: Neon's pooled endpoint silently
+discards the `search_path` parameter the tests use to isolate themselves, and the harness will
+stop with an error telling you so. (It strips `-pooler` for you, but the direct host is clearer.)
 
 ---
 
