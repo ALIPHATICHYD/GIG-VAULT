@@ -5,7 +5,7 @@ import "testing"
 // The demo cast was renamed on a database that already had the old rows, so
 // EnsureDemoWorker must update them in place, not skip them.
 func TestEnsureDemoWorkerRenamesExistingCast(t *testing.T) {
-	h := newHarness(t) // worker WRK_chidinma is "Chidinma Okafor"
+	h := newHarness(t)                 // worker WRK_chidinma is "Chidinma Okafor"
 	g := h.sendInvoice(t, "20000", 20) // client_name "Tolu Adeyemi"
 	// Swap the harness logins for the old demo logins, as on the team's database.
 	if _, err := h.pool.Exec(h.ctx, `UPDATE users SET id = 'USR_demo_creator', email = 'chidinma@demo.gigvault' WHERE id = $1`, h.creatorUserID); err != nil {

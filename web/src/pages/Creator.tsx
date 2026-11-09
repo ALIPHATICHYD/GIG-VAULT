@@ -1,3 +1,4 @@
+import { Bell, Notifications } from "../notify";
 import { useEffect, useMemo, useState } from "react";
 import { api, fmtDate, naira, session, usdt, type Gig, type Wallet } from "../api";
 import { navigate } from "../router";
@@ -150,6 +151,7 @@ export function CreatorHome() {
           <div className="text-[13px] text-mu">Welcome back</div>
           <div className="text-lg font-extrabold">{first(w?.worker.name ?? session.get()?.user.name)}</div>
         </div>
+        <Bell />
         <ThemeToggle />
       </div>
 
@@ -517,3 +519,7 @@ export function CreatorGig({ id }: { id: string }) {
 }
 
 export type { Wallet };
+
+export function CreatorNotifications() {
+  return <Notifications nav={NAV} />;
+}

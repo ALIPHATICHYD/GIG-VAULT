@@ -76,6 +76,7 @@ func (a *API) Router() http.Handler {
 			r.Use(a.Signer.Require(auth.Client, fail))
 			r.Post("/client/claim/{id}", a.claimGig)
 			r.Get("/client/bookings", a.clientBookings)
+			r.Get("/client/activity", a.clientActivity)
 			r.Get("/client/bookings/{id}", a.clientGig)
 			r.Post("/client/bookings/{id}/checkout", a.clientCheckout)
 			r.Post("/client/bookings/{id}/complete", a.clientAction("complete"))
@@ -259,6 +260,11 @@ func (a *API) claimGig(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.Svc.ClaimGig(r.Context(), sess(r).UserID, chi.URLParam(r, "id"), in.Token)
 	a.respond(w, r, http.StatusOK, "gig added to your bookings", out, err)
+}
+
+func (a *API) clientActivity(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.ClientActivity(r.Context(), sess(r).UserID)
+	a.respond(w, r, http.StatusOK, "activity", out, err)
 }
 
 func (a *API) clientBookings(w http.ResponseWriter, r *http.Request) {
