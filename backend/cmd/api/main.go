@@ -60,8 +60,9 @@ func run(log *slog.Logger) error {
 	}
 
 	svc := &gigs.Service{DB: pool, Busha: api, Cfg: cfg, Log: log}
+	// Demo accounts are a convenience; never let them stop the API from starting.
 	if err := svc.EnsureDemoWorker(ctx); err != nil {
-		return err
+		log.Warn("demo accounts not seeded", "err", err)
 	}
 
 	wk := &worker.Worker{DB: pool, Log: log, Handlers: map[string]worker.Handler{
