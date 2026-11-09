@@ -1,0 +1,81 @@
+name: Deploy Go API to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build Linux Binary & Deploy to aaPanel
+    runs-on: ubuntu-latest
+
+    env:
+      APP_NAME: gigvault-api
+      TEMP_BINARY: gigvault-api-temp
+      DEPLOY_DIR: /www/wwwroot/gigvault-api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Run Go vet & unit tests
+        working-directory: backend
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build Linux binary (temporary name)
+        working-directory: backend
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../${{ env.TEMP_BINARY }} ./cmd/api
+
+      - name: Upload temporary binary to VPS via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ${{ env.TEMP_BINARY }}
+          target: /home/${{ secrets.VPS_USER }}
+
+      - name: Move binary to aaPanel directory & restart service
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            echo "${{ secrets.VPS_SUDO_PASS }}" | sudo -S mkdir -p ${{ env.DEPLOY_DIR }}
+
+            # Atomic move prevents "Text file busy" lock error if binary is running
+            echo "${{ secrets.VPS_SUDO_PASS }}" | sudo -S mv -f /home/${{ secrets.VPS_USER }}/${{ env.TEMP_BINARY }} ${{ env.DEPLOY_DIR }}/${{ env.APP_NAME }}
+
+            # Ensure executable permissions and aaPanel www ownership
+            echo "${{ secrets.VPS_SUDO_PASS }}" | sudo -S chmod +x ${{ env.DEPLOY_DIR }}/${{ env.APP_NAME }}
+            echo "${{ secrets.VPS_SUDO_PASS }}" | sudo -S chown -R www:www ${{ env.DEPLOY_DIR }}
+
+            # Restart aaPanel Go daemon / systemd service if already configured
+            if systemctl list-unit-files | grep -q "^${{ env.APP_NAME }}\.service"; then
+              echo "${{ secrets.VPS_SUDO_PASS }}" | sudo -S systemctl restart ${{ env.APP_NAME }}
+              echo "Restarted systemd service: ${{ env.APP_NAME }}"
+            elif [ -f "/etc/init.d/${{ env.APP_NAME }}" ]; then
+              echo "${{ secrets.VPS_SUDO_PASS }}" | sudo -S /etc/init.d/${{ env.APP_NAME }} restart
+              echo "Restarted init.d service: ${{ env.APP_NAME }}"
+            else
+              echo "Binary deployed to ${{ env.DEPLOY_DIR }}/${{ env.APP_NAME }}. Ready for aaPanel Go Project wizard setup."
+            fi
+
