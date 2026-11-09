@@ -413,7 +413,17 @@ func (s *Service) EnsureDemoWorker(ctx context.Context) error {
 	_, err = s.DB.Exec(ctx, `INSERT INTO users (id, email, name, phone, role, password_hash, worker_id) VALUES
 		('USR_demo_creator', 'abdullah@demo.gigvault', 'Abdullah Oyetoro', '+2348000000000', 'creator', $1, 'WRK_chidinma'),
 		('USR_demo_client',  'aminat@demo.gigvault',   'Aminat Bello',     '+2348000000001', 'client',  $1, NULL)
-		ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`, hash)
+		ON CONFLICT DO NOTHING`, hash)
+	if err != nil {
+		return err
+	}
+	// Older databases have these ids under the old cast's emails. Rename them,
+	// unless another account already holds the new email (then leave both alone).
+	_, err = s.DB.Exec(ctx, `UPDATE users u SET email = v.email, name = v.name
+		FROM (VALUES ('USR_demo_creator', 'abdullah@demo.gigvault', 'Abdullah Oyetoro'),
+		             ('USR_demo_client',  'aminat@demo.gigvault',   'Aminat Bello')) AS v(id, email, name)
+		WHERE u.id = v.id AND u.email <> v.email
+		  AND NOT EXISTS (SELECT 1 FROM users o WHERE o.email = v.email AND o.id <> v.id)`)
 	if err != nil {
 		return err
 	}
