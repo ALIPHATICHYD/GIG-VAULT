@@ -1,0 +1,43 @@
+# Render Blueprint for the GigVault API (Go). Render -> New -> Blueprint -> pick this repo.
+# Secrets are marked sync: false, so Render asks for them in the dashboard; nothing secret lives here.
+services:
+  - type: web
+    name: gigvault-api
+    runtime: go
+    region: frankfurt
+    plan: starter            # free also works, but it sleeps after 15 min idle (30-60s cold start)
+    rootDir: backend
+    buildCommand: go build -ldflags="-s -w" -o app ./cmd/api
+    startCommand: ./app
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Neon Postgres. The API runs migrations on boot.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # Busha sandbox
+      - key: BUSHA_MODE
+        value: live
+      - key: BUSHA_BASE_URL
+        value: https://api.sandbox.busha.so
+      - key: BUSHA_SECRET_KEY
+        sync: false
+      - key: BUSHA_PUBLIC_KEY
+        sync: false
+      - key: BUSHA_PROFILE_ID
+        sync: false
+      - key: BUSHA_WEBHOOK_SECRET
+        sync: false
+      # App
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: ADMIN_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        value: https://gig-vault-beta.vercel.app
+      - key: ALLOW_DEV_ROUTES
+        value: "true"        # keeps the Simulate payment button for the demo
+      - key: LOGIN_RATE_LIMIT
+        value: "50"
