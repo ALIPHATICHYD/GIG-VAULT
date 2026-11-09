@@ -5,7 +5,7 @@ services:
     name: gigvault-api
     runtime: go
     region: frankfurt
-    plan: starter            # free also works, but it sleeps after 15 min idle (30-60s cold start)
+    plan: free               # switch to starter ($7/mo) to stop it sleeping after 15 min idle
     rootDir: backend
     buildCommand: go build -ldflags="-s -w" -o app ./cmd/api
     startCommand: ./app
