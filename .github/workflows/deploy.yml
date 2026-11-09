@@ -12,7 +12,7 @@ on:
 jobs:
   build-and-deploy:
     name: Build Linux Binary & Deploy to aaPanel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     env:
       APP_NAME: gigvault-api
